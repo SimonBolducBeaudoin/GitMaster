@@ -98,5 +98,3 @@ Feel free to fork this repository, make improvements, and submit pull requests. 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for more details.
 
 ---
-
-This markdown file provides an overview of the Git Submodule Manager script, detailing its features, usage, functions, and example commands to help users manage their projects with multiple git submodules effectively.
