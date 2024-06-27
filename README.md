@@ -4,95 +4,151 @@
 ## Overview
 
 The Git Submodule Manager is a bash script designed to simplify the management of Git projects with multiple submodules, which may also have their own submodules. 
-This script provides a range of functionalities, including checking out branches, pulling and pushing changes, committing with messages, and squashing commits across all submodules.
+It is 100% in bash which helps for portability.
 
 ## Features
 
-- **Checkout Branch**: Check out all submodules to a specified branch.
-- **Pull Changes**: Pull changes from the remote repositories of all submodules.
-- **Push Changes**: Push changes to the remote repositories of all submodules.
-- **Force Push Changes**: Forcefully push changes to the remote repositories of all submodules.
-- **Commit Changes**: Commit changes in all submodules and the parent repository with a given message.
-- **Squash Commits**: Squash commits in all submodules and the parent repository with a given message and an optional time window.
+- **tree**: Prints the tree of modules.
+- **climb**: Helps to recursively iterate over modules.
+- **grow**: Add and commit from leaves to trunk.
+- **checkout**: Checkouts the branches defined in `.gitmodules` (trunk first).
+- **pull**: Pulls and stops at conflicts (trunk first).
+- **add**: Adds files to the index for each module (leaves first).
+- **reset**: Git reset all modules.
+- **commit**: Record changes to the repository for each module and stops at conflicts (leaves first).
 
 ## Usage
 
-\`\`\`bash
-./git-master.sh [OPTIONS]
-\`\`\`
+### General Usage
 
-### Options
+Run the script in bash (unix) or in Git bash (windows)
+```bash
+. /git-master.sh 
+```
 
-- `-h`, `--help`: Display the help message.
-- `-ch`, `--checkout BRANCH`: Check out all submodules to the specified branch.
-- `-pl`, `--pull`: Pull changes from the remote repositories of all submodules.
-- `-ps`, `--push`: Push changes to the remote repositories of all submodules.
-- `-fp`, `--force-push`: Forcefully push changes to the remote repositories of all submodules.
-- `-c`, `--commit MESSAGE`: Commit changes in all submodules and the parent repository with the given message.
-- `-s`, `--squash MESSAGE [TIME_WINDOW]`: Squash commits in all submodules and the parent repository with the given message and an optional time window (e.g., '1 day ago' or '12 hours ago').
+```sh
+gitmod [-h | --help] [-C <path>] <command> [<args>]
+```
 
-## Functions
+### Commands
 
-### Helper Functions
+#### `tree`
 
-- **usage()**: Displays the usage instructions.
-- **generate_submodule_tree()**: Recursively generates the submodule tree.
-- **get_all_submodules()**: Retrieves all submodule paths recursively.
-- **sort_deepest_first()**: Sorts paths with the deepest directories first.
-- **sort_shallowest_first()**: Sorts paths with the shallowest directories first.
-- **remove_duplicate_paths()**: Removes duplicate paths, retaining the shortest one.
-- **find_unique_paths()**: Finds unique paths not present in a list of non-duplicate paths.
-- **special_print()**: Prints a message with special formatting.
-- **status_paths()**: Displays the short status of all submodules.
+Prints the tree of modules.
 
-### Main Functions
+```sh
+gitmod tree
+```
 
-- **checkout_branch(branch)**: Checks out the specified branch if it exists.
-- **checkout_paths(branch, paths)**: Checks out the specified branch in all provided paths.
-- **pull_paths(paths)**: Pulls changes from the remote repositories for all provided paths.
-- **push_paths(paths)**: Pushes changes to the remote repositories for all provided paths.
-- **force_push_paths(paths)**: Forcefully pushes changes to the remote repositories for all provided paths.
-- **squash_commits(message, paths, time_window)**: Squashes commits with the given message and time window for all provided paths.
-- **commit_paths(message, paths)**: Commits changes with the given message for all provided paths.
+#### `climb`
 
-## Example Usage
+Helps to recursively iterate over modules.
 
-### Checkout Branch
+```sh
+gitmod climb <func> [options]
+```
 
-\`\`\`bash
-./git-master.sh --checkout develop
-\`\`\`
+Options:
 
-This command checks out the `develop` branch in all submodules.
+- `--leaves`: Execute on leaves.
+- `--branches`: Execute on branches.
+- `--trunk`: Execute on trunk.
+- `--up`: Climb up the tree.
+- `--down`: Climb down the tree.
 
-### Pull Changes
+#### `grow`
 
-\`\`\`bash
-./git-master.sh --pull
-\`\`\`
+Add and commit from leaves to trunk.
 
-This command pulls changes from the remote repositories of all submodules.
+```sh
+gitmod grow
+```
 
-### Commit Changes
+#### `checkout`
 
-\`\`\`bash
-./git-master.sh --commit "Updated submodule configurations"
-\`\`\`
+Checkouts the branches defined in `.gitmodules`.
 
-This command commits changes with the message "Updated submodule configurations" in all submodules and the parent repository.
+```sh
+gitmod checkout
+```
 
-### Squash Commits
+#### `pull`
 
-\`\`\`bash
-./git-master.sh --squash "Squashed commits" "1 week ago"
-\`\`\`
+Pulls and stops at conflicts (trunk first).
 
-This command squashes commits with the message "Squashed commits" from the last week in all submodules and the parent repository.
+```sh
+gitmod pull [--rebase | --merge]
+```
 
-## Contributing
+#### `add`
 
-Feel free to fork this repository, make improvements, and submit pull requests. Contributions are welcome!
+Adds files to the index for each module (leaves first).
 
+```sh
+gitmod add [--module | --all | --no-module]
+```
+
+#### `reset`
+
+Git reset all modules.
+
+```sh
+gitmod reset
+```
+
+#### `commit`
+
+Record changes to the repository for each module and stops at conflicts (leaves first).
+
+```sh
+gitmod commit -m <message> [options]
+```
+
+Options:
+
+- `--trunk`
+- `--branches`
+- `--leaves`
+
+## Examples
+
+### Tree of Modules
+
+```sh
+gitmod tree
+```
+
+### Climb Example
+
+```sh
+dummy() {
+    dir="$1"
+    path="$2"
+    name="$3"
+    echo "Module $name in directory $dir"
+    git -C "$path" log --all --decorate --oneline --graph -n1
+}
+gitmod climb dummy --trunk --leaves --down
+```
+
+### Checkout Branches
+
+```sh
+gitmod checkout -C /path/to/repo
+```
+
+### Pull with Rebase
+
+```sh
+gitmod pull --rebase
+```
+
+### Add and Commit Module Pointers
+
+```sh
+gitmod add -C /path/to/repo --modules
+gitmod commit -m 'Updating modules'
+```
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for more details.
