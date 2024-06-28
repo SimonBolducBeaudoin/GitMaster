@@ -7,6 +7,44 @@ echo_colored() {
     echo -e "\e[${color}m${message}\e[0m"
 }
 
+get_yes_no() {
+    local prompt answer default
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -d|--default)
+                if [[ "$2" =~ ^[YyNn]$ ]]; then
+                    default="$2"
+                    shift 2
+                else
+                    echo "Invalid default value. Use 'Y' or 'N'."
+                    return 1
+                fi
+                ;;
+            *)
+                prompt="$*"
+                break
+                ;;
+        esac
+    done
+
+    while true; do
+        if [ -n "$default" ]; then
+            read -rp "$prompt (Y/N) [${default}]: " answer
+            answer="${answer:-$default}"
+        else
+            read -rp "$prompt (Y/N): " answer
+        fi
+        
+        case "$answer" in
+            [Yy]* ) echo true; return 0;;
+            [Nn]* ) echo false; return 0;;
+            * ) echo "Please answer Y or N.";;
+        esac
+    done
+}
+
+
 SUBMODULE_NAME='^[[:space:]]*\\[submodule[[:space:]]*\"(.+)\"[[:space:]]*\\][[:space:]]*$'
 TRIM='^[[:space:]]+|[[:space:]]+$'
 COMMENT='^[[:space:]]*#'
@@ -78,7 +116,7 @@ gitmod() {
 		local -n cmd_args_ref=$3
 		shift 3
 
-		local valid_commands=("tree" "climb" "grow" "checkout" "pull" "add" "reset" "commit")
+		local valid_commands=("tree" "climb" "grow" "checkout" "pull" "add" "reset" "commit" "mute")
 
 		while (( "$#" )); do
 			case "$1" in
@@ -252,7 +290,7 @@ climb() {
 		
 		# On the way up
 		if (( DEPTH > 0 ))	&& $UPWARD && [ -f "$dir/$path/.gitmodules" ] && $BRANCHES ; then
-			"$func" "$dir" "$path" "$module"
+			"$func" "$dir" "$dir/$path" "$module"
 		fi
 		
 		if [ -f "$dir/$path/.gitmodules" ] ; then
@@ -263,17 +301,17 @@ climb() {
 			for ((i=0; i<$len; i++)); do
 				local name="${names[$i]}"
 				local subpath="$(get_module_key "$dir/$path/.gitmodules" "$name" "path")"
-				climbing "$func" "$dir/$path" "$path/$subpath" "$name"
+				climbing "$func" "$dir/$path" "$subpath" "$name"
 			done
 		elif $LEAVES && (( DEPTH < MAXDEPTH )); then
 			ISLEAVES=true
-		   "$func" "$dir" "$path" "$module"
+		   "$func" "$dir" "$dir/$path" "$module"
 			ISLEAVES=false			
 		fi
 		
 		# On the way down
 		if (( DEPTH > 0 ))	&& ! $UPWARD && [ -f "$dir/$path/.gitmodules" ] && $BRANCHES ; then
-			"$func" "$dir" "$path" "$module"
+			"$func" "$dir" "$dir/$path" "$module"
 		fi
 		
 		(( DEPTH -= 1 ))
@@ -358,18 +396,17 @@ tree() {
 			indent+="    "
 		done
 		
+		current_branch=$(git -C "$path" rev-parse --abbrev-ref HEAD)
 		if $ISTRUNK ; then
 			repo_path=$(git -C "$path" rev-parse --show-toplevel)
 			repo_name=$(basename "$repo_path")
-			current_branch=$(git -C "$path" rev-parse --abbrev-ref HEAD)
 			echo_colored "${repo_name} ($current_branch)" "$RED"
 		elif $ISLEAVES ; then
-			current_branch=$(git -C "$path" rev-parse --abbrev-ref HEAD)
 			echo_colored "${indent}└── ${name} ($current_branch)" "$GREEN"
 		else 
-			current_branch=$(git -C "$path" rev-parse --abbrev-ref HEAD)
 			echo "${indent}└── ${name} ($current_branch)"
 		fi
+		
 	}
 	
     tree_parse SHOW_HELP "${@}"
@@ -377,8 +414,6 @@ tree() {
         tree_help
         return 0
     fi
-	
-	
 	
 	echo "Legend :"
 	echo_colored "	trunk" "$RED"
@@ -908,4 +943,85 @@ grow() {
 	
 	
 	unset -f grow_module -f grow_parse -f grow_help -f add_module
+}
+
+mute() {
+    local SHOW_HELP=false
+	local RED='31'
+	local GREEN='32'
+	
+	mute_help() {
+		echo "Ask if module should be prevented to push to origin."
+		echo 
+		echo "Usage: gitmod [...] mute"
+		}
+	mute_parse() {
+		local -n show_help_ref=$1
+
+		shift 1
+
+		#dir should normally have been declared globally but in case it asn't
+		if [ -z "$dir" ] ; then
+			dir="."
+		fi
+		
+		while [[ $# -gt 0 ]]; do
+			case "$1" in
+				--help)
+					show_help_ref=true
+					shift
+					;;
+				*)
+					echo "Unknown option: $1"
+					exit 1
+					;;
+			esac
+		done
+	}
+	
+	mute_tree(){
+		local depth=$DEPTH #defined in climb
+		local dir="$1"
+		local path="$2"
+		local name="$3"
+		local ismute
+		
+		local indent=""
+		for ((j=0; j<$depth; j++)); do
+			indent+="    "
+		done
+		
+		current_branch=$(git -C "$path" rev-parse --abbrev-ref HEAD)
+		if $ISTRUNK ; then
+			repo_path=$(git -C "$path" rev-parse --show-toplevel)
+			repo_name=$(basename "$repo_path")
+			echo_colored "${repo_name} ($current_branch)" "$RED"
+			# never mute trunk
+		elif $ISLEAVES ; then
+			local message="${indent}└── ${name} ($current_branch)"
+			local color="$GREEN"
+			echo -e -n "\e[${color}m${message}\e[0m"
+		else 
+			echo -n "${indent}└── ${name} ($current_branch)"
+		fi
+		
+		if ! $ISTRUNK ; then
+			ismute=$(get_yes_no -d N "")
+		fi 
+		
+		if $ismute ; then
+			git -C "$path" remote set-url --push origin no_push
+		fi
+	}
+	
+    mute_parse SHOW_HELP "${@}"
+    if $SHOW_HELP; then
+        mute_help
+        return 0
+    fi
+	
+	 echo "Which module do we mute ?"
+	gitmod climb mute_tree --trunk --branches --leaves --up
+	
+	unset -f mute_tree -f mute_help -f mute_parse
 }
