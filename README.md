@@ -6,17 +6,6 @@
 The Git Submodule Manager is a bash script designed to simplify the management of Git projects with multiple submodules, which may also have their own submodules. 
 It is 100% in bash which helps for portability.
 
-## Features
-
-- **tree**: Prints the tree of modules.
-- **climb**: Helps to recursively iterate over modules.
-- **grow**: Add and commit from leaves to trunk.
-- **checkout**: Checkouts the branches defined in `.gitmodules` (trunk first).
-- **pull**: Pulls and stops at conflicts (trunk first).
-- **add**: Adds files to the index for each module (leaves first).
-- **reset**: Git reset all modules.
-- **commit**: Record changes to the repository for each module and stops at conflicts (leaves first).
-
 ## Usage
 
 ### General Usage
@@ -25,11 +14,22 @@ Run the script in bash (unix) or in Git bash (windows)
 ```bash
 . /git-master.sh 
 ```
-
+This exports the gitmod functon in your environnement.
+gitmod is made to have an interface similar to git (when possible),
 ```sh
 gitmod [-h | --help] [-C <path>] <command> [<args>]
 ```
-
+but commands should be though of as beeing applied to the current repo and all its subrepo (modules) and all theirs ...
+Commands :
+- **tree**: Prints the tree of modules.
+- **climb**: A helper to recursively iterate over modules. Similar to but wiser than 'git submodule foreach'.
+- **grow**: Add and commit (leaves --> trunk ).
+- **checkout**: Checkouts the branches defined in `.gitmodules` (trunk first).
+- **pull**: Pulls and stops at conflicts (trunk first).
+- **add**: Adds files to the index for each module (leaves first).
+- **reset**: Git reset all modules.
+- **commit**: Record changes to the repository for each module and stops at conflicts (leaves first).
+		
 ### Commands
 
 #### `tree`
@@ -149,6 +149,20 @@ gitmod pull --rebase
 gitmod add -C /path/to/repo --modules
 gitmod commit -m 'Updating modules'
 ```
+
+## Tips
+### Setup a module as pull only
+If you don't indent to participate/push to a certain (sub)module it's a good idea to prevent your self from accidentally pushing to that repo.
+An easy way to do that is to set the push url to a dummy value ('no_push')
+
+```sh
+cd path/to/your/submodule
+git remote set-url --push origin no_push
+```
+
+
+
+
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for more details.
