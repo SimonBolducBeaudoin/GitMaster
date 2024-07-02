@@ -1,10 +1,248 @@
 #!/bin/bash
+gitmod ()(
+# A big function using a subshell to separate scopes
+# This helps with error handling (just use exit 1 instead of exit 1)
+# and makes all function and variables local
+
+gitmod_help() {
+local help_message="
+An extension of git for projects with git modules.
+
+Usage: gitmod [-h | --help] [-C <path>] <command> [<args>]
+
+These are the supported commands for now :
+  tree        prints the tree of modules
+  climb       Helps to recursively iterate over modules
+  grow        Add and commit from leaves to trunk
+  checkout    Checkouts the branches defined in .gitmodules (trunk first)
+  pull        pulls and stop at conflicts (trunk first)
+  add         Adds files to the index for each module (leaves first)
+  reset       git reset all modules
+  commit      Record changes to the rep4Zository for each module and stops at conflicts (leaves first)
+
+Example usage:
+  # The tree of modules as a trunk branches and leaves
+  gitmod tree
+  
+  # climb is similar but more powerful than git submodule --foreach
+  gitmod climb --help
+  
+  # Resolving detached head states for each modules
+  gitmod checkout -C /path/to/repo 
+  
+  # Getting updates
+  gitmod pull --rebase
+  
+  # Only committing commit pointers (aka the state of each module)
+  gitmod add -C /path/to/repo --modules
+  gitmod commit -m 'Updating modules'
+	"
+	echo "$help_message"
+}
+
+climb_help() {
+local help_message="
+A helper to iterate over a tree of git modules.
+Climbing up or down the tree of git modules calling <func> every step of the way.
+
+Usage: gitmod [...] climb <func> [options]
+
+Options:
+	  --leaves                Execute on leaves (default is false)
+	  --branches              Execute on leaves (default is false)
+	  --trunk                 Execute on trunk  (default is false)
+	  --up                    Climb up the tree (default)
+	  --down                  Climb down the tree
+	  --help                  Display this help message
+
+Help:
+To see what trunk, branches, and leaves are, call
+	gitmod tree.
+When using --trunk, func will be called on the trunk using \$path=\$dir (i.e. trunk has no parents).
+
+Examples:
+
+	# Use git -C \$path to call git in the current submodule (inside the current module)
+	dummy() {
+		# Climb will recursively call this function in each module
+		dir='\$1'    # \$1 is the directory of that module
+		path='\$2'   # \$2 is the path towards the current submodule (inside module)
+		name='\$3'   # \$3 is the name of the current submodule (inside module)
+		echo ' Module \$3 in directory \$1 '
+		git -C '\$path' log --all --decorate --oneline --graph -n1
+	}
+	gitmod climb dummy --trunk --leaves --down
+
+	# use get_module_key '.../gitmodules' '\$name' 'key'
+	# to read the current module's .gitmodule file
+	# and get the value (of key) for the current submodule
+	# The keys path and url are mandatory (git submodule rules)
+	# And the keys branch and update can be defined by the user.
+	say_url() {
+		dir='\$1'
+		path='\$2'
+		name='\$3'
+		url=\$(get_module_key "\$dir/.gitmodules" "\$name" "url")
+		echo '\$name : \$url'
+	}
+	gitmod climb say_url --trunk --branches --leaves --up
+	"
+	echo "$help_message"
+}
+
+tree_help() {
+local help_message="	
+Shows the module tree.
+Usage: gitmod [...] tree"
+	echo "$help_message"
+}
+
+checkout_help() {
+local help_message="
+For each module in .gitmodules gets the value of branch
+and then call 'git checkout branch' for that module.
+It doesn't checkout the trunk.
+The checkout order is then branches-->leaves
+
+Usage: gitmod [...] checkout"
+echo "$help_message"
+}
+
+pull_help() {
+local help_message="
+For each module in .gitmodules gets the value of update (merge or rebase)	
+to determine which type of pull it should do.
+If conflicts occurs during a pull it stops there (doesn't pull the whole project).
+You must then solve the conflict for that specific project and pull gitmod pull again.
+	
+The pull order is then trunk-->branches-->leaves
+
+Usage: gitmod [...] pull 
+
+Options:
+      -r | --rebase 		 forces pull --rebase for all module
+      --merge | --no-rebase forces pull --no-rebase for all module"
+echo "$help_message"
+}
+
+add_help() {
+local help_message="
+Add changes (all,module pointers only or all minus module pointers) to all modules.
+By default it adds all changes that aren't module.
+This is because one might be tricked into think that
+gitmod add followed by git mod commit would have the
+same effect as commit the whole local super repo.
+If you which to have this effect use  gitmod grow,
+which add and commits leaves before add and commit branches.
+
+Usage: gitmod [...] add [options] 
+	echo
+Options:
+	   --no-module           only add changes that are not modules (default)
+      -m | --module		 only add changes commits pointer of modules 
+      -a | --all   		 add all changes "
+echo "$help_message"
+}
+
+reset_help() {
+local help_message="
+Resets all modules (git reset).
+
+Usage: gitmod [...] reset "
+echo "$help_message"
+}
+
+commit_help() {
+local help_message="
+Commit all staged changes in all modules with the same message.
+
+Usage: gitmod [...] commit -m <message> [options]
+		echo
+Options:
+      -m <message>      Commit message
+      --[no-]trunk		 
+      --[no-]branch   	 
+      --[no-]leaves   	 "
+echo "$help_message"
+}
+
+grow_help() {
+local help_message="
+Add and commit each modules leaves --> trunk 
+
+Usage: gitmod [...] grow -m <message> [options] 
+
+Options:
+		-m | --message       commit message (mendatory) 
+      -a | --all   		 add all changes (default) 
+     --module		         only add changes commits pointer of modules 
+	   --no-module           only add changes that are not modules"
+echo "$help_message"
+}
+
+mute_help() {
+local help_message="
+Prevents to push to origin by setting origin url to no_push.
+Goes through each module one by one prompting (Y/N) if the module should be muted.
+
+Usage: gitmod [...] mute [options]
+
+Options :
+		--undo 			Reset the push url to be equal to the pull url.
+"
+echo "$help_message"
+}
+
+prompt_help() {
+local help_message="
+Promts the user (Y/N) one module at a time to trigger some given action (func).
+ 
+Usage: gitmod [...] prompt func [options]" 
+echo "$help_message"
+}
 
 echo_colored() {
 	# see ANSI color codes
-    local message="$1" # Message to print
+	local message="$1" # Message to print
 	local color="$2"   # Color code
-    echo -e "\e[${color}m${message}\e[0m"
+	echo -e "\e[${color}m${message}\e[0m"
+}
+
+get_yes_no() {
+	local prompt answer default
+
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+			-d|--default)
+				if [[ "$2" =~ ^[YyNn]$ ]]; then
+					default="$2"
+					shift 2
+				else
+					echo "Invalid default value. Use 'Y' or 'N'."
+					exit 1
+				fi
+				;;
+			*)
+				prompt="$*"
+				break
+				;;
+		esac
+	done
+
+	while true; do
+		if [ -n "$default" ]; then
+			read -rp "$prompt (Y/N) [${default}]: " answer
+			answer="${answer:-$default}"
+		else
+			read "$prompt (Y/N): " answer
+		fi
+		
+		case "$answer" in
+			[Yy]* ) echo true; return 0;;
+			[Nn]* ) echo false; return 0;;
+			* ) echo "" ; echo -n "Please answer Y or N.";;
+		esac
+	done
 }
 
 SUBMODULE_NAME='^[[:space:]]*\\[submodule[[:space:]]*\"(.+)\"[[:space:]]*\\][[:space:]]*$'
@@ -22,63 +260,30 @@ get_module_key(){
 	local key="$3"
 	
 	local awk_prgm='
-    BEGIN { in_table = 0 }
-        function trim(str) { gsub( trim_reg, "", str); return str }
+	BEGIN { in_table = 0 }
+		function trim(str) { gsub( trim_reg, "", str); return str }
 	$0 ~ comment { next }  
-    match($0, table_head, matches) {
-        if (matches[1] == table_name) { in_table = 1 } else { in_table = 0 }
-        }
-    in_table && trim($1) == key { print trim($2) }
-        '
-	
+	match($0, table_head, matches) {
+		if (matches[1] == table_name) { in_table = 1 } else { in_table = 0 }
+		}
+	in_table && trim($1) == key { print trim($2) }
+		'
+
 	awk -F= -v table_name="$name" -v key="$key" -v table_head="$SUBMODULE_NAME" -v trim_reg="$TRIM" -v comment="$COMMENT" "$awk_prgm" "$file"
 }
 
 gitmod() {
-    local dir="."
-    local command=""
-    local CMDARGS=()
-
-	gitmod_help() {
-		echo "An extension of git for projects with git modules."
-		echo
-		echo "Usage: gitmod [-h | --help] [-C <path>] <command> [<args>]"
-		echo 
-		echo "These are the supported commands for now :"
-		echo "  tree 		prints the tree of modules"
-		echo "  climb 		Helps to recursively iterate over modules"
-		echo "  grow 		Add and commit from leaves to trunk"
-		echo "  checkout    Checkouts the branches defined in .gitmodules (trunk first)"
-		echo "  pull        pulls and stop at conflicts (trunk first)"
-		echo "  add         Adds files to the index for each module (leaves first)"
-		echo "	reset 		git reset all modules"
-		echo "  commit 		Record changes to the repository for each module and stops at conflicts (leaves first)"
-		echo
-		echo "Example usage:
-			# The tree of modules as a trunk branches and leaves
-			gitmod tree
-			
-			# climb is similar but more powerful than git submodule --foreach
-			gitmod climb --help
-			
-			# Resolving detached head states for each modules
-			gitmod checkout -C /path/to/repo 
-			
-			# Getting updates
-			gitmod pull --rebase
-			
-			# Only commiting commit pointers (aka the state of the each module)
-			gitmod add -C /path/to/repo --modules
-			gitmod commit -m  'Updating modules'"	
-	}
-
+	local dir="."
+	local command=""
+	local CMDARGS=()
+		
 	gitmod_parse() {
 		local -n dir_ref=$1
 		local -n command_ref=$2
 		local -n cmd_args_ref=$3
 		shift 3
 
-		local valid_commands=("tree" "climb" "grow" "checkout" "pull" "add" "reset" "commit")
+		local valid_commands=("tree" "climb" "prompt" "grow" "checkout" "pull" "add" "reset" "commit" "mute")
 
 		while (( "$#" )); do
 			case "$1" in
@@ -118,85 +323,43 @@ gitmod() {
 		done
 	}
 
-    gitmod_parse dir command CMDARGS "$@"
+	gitmod_parse dir command CMDARGS "$@"
 
-    if [ -z "$command" ] ; then
-       gitmod_help
-       return 0
-    fi
+	if [ -z "$command" ] ; then
+	   gitmod_help
+	   exit 1
+	fi
 	
-    # Execute the command with the collected flags
-    "$command" "${CMDARGS[@]}"
+	# Execute the command with the collected flags
+	"$command" "${CMDARGS[@]}"
+	
+	unset -f gitmod_parse
 }
 
 climb() {
-    local func="$1"
-    local LEAVES=false
+	local func=""
+	local LEAVES=false
 	local BRANCHES=false
-    local TRUNK=false
-    local UPWARD=true
-    local SHOW_HELP=false
+	local TRUNK=false
+	local UPWARD=true
+	local SHOW_HELP=false
 	
 	local ISTRUNK=false
 	local ISLEAVES=false
 	local -i DEPTH=0
 	local -i MAXDEPTH=5
 	
-	climb_help() {
-		echo "A helper to iterate over a tree of git modules."
-		echo "Climbing up or down the tree of git modules calling <func> every step of the way."
-		echo
-		echo "Usage: gitmod [...] climb <func> [options]"
-		echo
-		echo "Options:"
-		echo "      --leaves                Execute on leaves (default is false)"
-		echo "		--branches				Execute on leaves (default is false)"
-		echo "      --trunk            		Execute on trunk  (default is false) "
-		echo "      --up                    Climb up the tree (default)"
-		echo "      --down                  Climb up the tree"
-		echo "      --help                  "
-		echo
-		echo "help:"
-		echo "To see what trunk,branches and leaves are call 
-			gitmod tree."
-		echo "When using --trunk func will be called on the trunk using $path=$dir (i.e. trunk as no parents)".
-		echo "Examples:
-		
-			# Use git -C $path to call git in the current submodule (inside the current module)
-			dummy() {
-				# Climb will recursively call this funciton in each module
-				dir='$1'	# $1 is the directory of that module
-				path='$2'	# $2 is the path towards the current submodule (inside module)
-				name='$3'	# $3 is the name of the current submodule (inside module)
-				echo ' Module $3 in directory $1 '
-				git -C '$path' log --all --decorate --oneline --graph -n1
-			}
-			gitmod climb dummy --trunk --leaves --down
-			
-			# use get_module_key '.../gitmodules' '$name' 'key' 
-			# to read the current module's .gitmodule file
-			# and get the value (of key) for the current submodule
-			# The keys path and url are mendatory (git submodule rules)
-			# And the keys branch and update can be defined by the user.  
-			say_url() {
-				dir='$1'	
-				path='$2'
-				name='$3'
-				url=$(get_module_key "$dir/.gitmodules" "$name" "url")
-				echo '$name : $url'
-			}
-			gitmod climb say_url --trunk --branches --leaves --up
-		"
-	}
-
 	climb_parse() {
 		local -n leaves_ref=$1
 		local -n branches_ref=$2
 		local -n trunk_ref=$3
 		local -n upward_ref=$4
 		local -n show_help_ref=$5
+		local -n func_ref=$6
+		
+		local non_flag_args=0
 
-		shift 5
+		shift 6
 
 		#dir should normally have been declared globally but in case it asn't
 		if [ -z "$dir" ] ; then
@@ -229,9 +392,18 @@ climb() {
 					show_help_ref=true
 					shift
 					;;
-				*)
+				-*)
 					echo "Unknown option: $1"
 					exit 1
+					;;
+				*)
+					non_flag_args=$((non_flag_args + 1))
+					if [[ $non_flag_args -gt 1 ]]; then
+						echo "Unknown option: $1"
+						exit 1
+					fi
+					func_ref="$1"
+					shift
 					;;
 			esac
 		done
@@ -252,7 +424,8 @@ climb() {
 		
 		# On the way up
 		if (( DEPTH > 0 ))	&& $UPWARD && [ -f "$dir/$path/.gitmodules" ] && $BRANCHES ; then
-			"$func" "$dir" "$path" "$module"
+			"$func" "$dir" "$dir/$path" "$module"
+			
 		fi
 		
 		if [ -f "$dir/$path/.gitmodules" ] ; then
@@ -263,66 +436,197 @@ climb() {
 			for ((i=0; i<$len; i++)); do
 				local name="${names[$i]}"
 				local subpath="$(get_module_key "$dir/$path/.gitmodules" "$name" "path")"
-				climbing "$func" "$dir/$path" "$path/$subpath" "$name"
+				climbing "$func" "$dir/$path" "$subpath" "$name"
 			done
 		elif $LEAVES && (( DEPTH < MAXDEPTH )); then
 			ISLEAVES=true
-		   "$func" "$dir" "$path" "$module"
+		   "$func" "$dir" "$dir/$path" "$module"
 			ISLEAVES=false			
+			
 		fi
 		
 		# On the way down
 		if (( DEPTH > 0 ))	&& ! $UPWARD && [ -f "$dir/$path/.gitmodules" ] && $BRANCHES ; then
-			"$func" "$dir" "$path" "$module"
+			"$func" "$dir" "$dir/$path" "$module"
+			
 		fi
 		
 		(( DEPTH -= 1 ))
 	}
 	
-    climb_parse LEAVES BRANCHES TRUNK UPWARD SHOW_HELP "${@:2}"
-
-    if $SHOW_HELP; then
-        climb_help
-        return 0
-    fi
+	climb_parse LEAVES BRANCHES TRUNK UPWARD SHOW_HELP func "${@}"
+		
+	if $SHOW_HELP; then
+		climb_help
+		exit 1
+	fi
 	
 	if $TRUNK && $UPWARD; then
 		ISTRUNK=true
 		"$func" "$dir" "$dir" "Trunk"
 		ISTRUNK=false
+		
 	fi
 	
 	# Now it's time to start climbinb fr
 	if [ -f "$dir/.gitmodules" ]; then		
 		local names=()
-        mapfile -t names < <(get_module_names "$dir/.gitmodules")
-        local len=${#names[@]}
-        local i
-        for ((i=0; i<$len; i++)); do
-            local name="${names[$i]}"
+		mapfile -t names < <(get_module_names "$dir/.gitmodules")
+		local len=${#names[@]}
+		local i
+		for ((i=0; i<$len; i++)); do
+			local name="${names[$i]}"
 			local path="$(get_module_key "$dir/.gitmodules" "$name" "path")"
 			climbing "$func" "$dir" "$path" "$name"
-        done
+			
+		done
 	fi
 	
 	if $TRUNK && ! $UPWARD; then
 		ISTRUNK=true
 		"$func" "$dir" "$dir" "Trunk"
 		ISTRUNK=false
+		
 	fi	
 	 
-	unset -f climbing -f climb_help -f climb_parse
+	unset -f climbing -f climb_parse
+}
+
+prompt() {
+	local SHOW_HELP=false
+	local RED='31'
+	local GREEN='32'
+	local MESSAGE=""
+	local FUNC=""
+	local YALL=false
+	
+	prompt_parse() {
+		local -n show_help_ref=$1
+		local -n message_ref=$2
+		local -n func_ref=$3
+		local -n yall_ref=$4
+		
+		local non_flag_args=0
+
+		shift 4
+		
+		if [ -z "$dir" ] ; then
+			dir="."
+		fi
+		
+		while [[ $# -gt 0 ]]; do
+			case "$1" in
+				--help)
+					show_help_ref=true
+					shift
+					;;
+				-m | --message)
+					if [[ -n "$2" && "$2" != -* ]]; then
+						message_ref="$2"
+						shift 2
+					else
+						echo "Error: -m requires a commit message."
+						exit 1
+					fi
+					;;
+				-y | --yes)
+					yall_ref=true
+					shift
+					;;
+				-*)
+					echo "Unknown option: $1"
+					exit 1
+					;;
+				*)
+					non_flag_args=$((non_flag_args + 1))
+					if [[ $non_flag_args -gt 1 ]]; then
+						echo "Unknown option: $1"
+						exit 1
+					fi
+					func_ref="$1"
+					shift
+					;;
+			esac
+		done
+	}
+	
+	prompt_tree(){
+		local depth=$DEPTH #defined in climb
+		local dir="$1"
+		local path="$2"
+		local name="$3"
+		local answer=false
+		local message=""
+		local padding
+		local max_length=50
+		local FUNCRET=""
+		
+		local indent=""
+		for ((j=0; j<$depth; j++)); do
+			indent+="    "
+		done
+		
+		current_branch=$(git -C "$path" rev-parse --abbrev-ref HEAD)
+		if $ISTRUNK ; then
+			repo_path=$(git -C "$path" rev-parse --show-toplevel)
+			repo_name=$(basename "$repo_path")
+			message="${repo_name} ($current_branch)"
+			local color="$RED"
+			echo -e -n "\e[${color}m${message}\e[0m"
+		elif $ISLEAVES ; then
+			message="${indent}└── ${name} ($current_branch)"
+			local color="$GREEN"
+			echo -e -n "\e[${color}m${message}\e[0m"
+		else 
+			message="${indent}└── ${name} ($current_branch)"
+			echo -n "$message"
+		fi
+				
+		if $YALL ; then
+			echo ""
+			answer=true
+		else
+			length="${#message}"
+			padding=$((max_length - length))
+			padding=$((padding > 0 ? padding : 0))
+			printf "%*s" "$padding" ""
+			answer="$(get_yes_no -d N "")"
+		fi
+		
+		if $answer ; then
+			FUNCRET="$($FUNC "$dir" "$path" "$name")"
+		fi
+		
+		if [ -n "$FUNCRET" ] ; then
+			if $ISTRUNK ; then
+			echo -e "\e[${color}m${FUNCRET}\e[0m"
+			elif $ISLEAVES ; then
+				message="${indent}    $FUNCRET"
+				echo -e "\e[${color}m${message}\e[0m" 
+			else
+				echo "${indent}    $FUNCRET"
+			fi
+		fi
+	}
+	
+	prompt_parse SHOW_HELP MESSAGE FUNC YALL "${@}"
+	
+	if $SHOW_HELP; then
+		prompt_help
+		exit 1
+	fi
+	
+	echo "$MESSAGE"
+	gitmod climb prompt_tree --trunk --branches --leaves --up
+	
+	unset -f prompt_tree -f prompt_parse
 }
 
 tree() {
-    local SHOW_HELP=false
+	local SHOW_HELP=false
 	local RED='31'
 	local GREEN='32'
 	
-	tree_help() {
-		echo "Shows the module tree."
-		echo "Usage: gitmod [...] tree"
-		}
 	tree_parse() {
 		local -n show_help_ref=$1
 
@@ -358,27 +662,24 @@ tree() {
 			indent+="    "
 		done
 		
+		current_branch=$(git -C "$path" rev-parse --abbrev-ref HEAD)
 		if $ISTRUNK ; then
 			repo_path=$(git -C "$path" rev-parse --show-toplevel)
 			repo_name=$(basename "$repo_path")
-			current_branch=$(git -C "$path" rev-parse --abbrev-ref HEAD)
 			echo_colored "${repo_name} ($current_branch)" "$RED"
 		elif $ISLEAVES ; then
-			current_branch=$(git -C "$path" rev-parse --abbrev-ref HEAD)
 			echo_colored "${indent}└── ${name} ($current_branch)" "$GREEN"
 		else 
-			current_branch=$(git -C "$path" rev-parse --abbrev-ref HEAD)
 			echo "${indent}└── ${name} ($current_branch)"
 		fi
+		
 	}
 	
-    tree_parse SHOW_HELP "${@}"
-    if $SHOW_HELP; then
-        tree_help
-        return 0
-    fi
-	
-	
+	tree_parse SHOW_HELP "${@}"
+	if $SHOW_HELP; then
+		tree_help
+		exit 1
+	fi
 	
 	echo "Legend :"
 	echo_colored "	trunk" "$RED"
@@ -393,17 +694,9 @@ tree() {
 }
 
 checkout() {
-    local SHOW_HELP=false
+	local SHOW_HELP=false
 	local GREEN='32'
 	
-	checkout_help() {
-		echo "For each module in .gitmodules gets the value of branch"
-		echo "and then call 'git checkout branch' for that module."
-		echo "It doesn't checkout the trunk."
-		echo "The checkout order is then branches-->leaves"
-		echo ""
-		echo "Usage: gitmod [...] checkout"
-		}
 	checkout_parse() {
 		local -n show_help_ref=$1
 		shift 1
@@ -421,17 +714,17 @@ checkout() {
 					;;
 				*)
 					echo "Unknown option: $1"
-					return 1
+					exit 1
 					;;
 			esac
 		done
 	}
 	
-    checkout_parse SHOW_HELP "${@}"
-    if $SHOW_HELP; then
-        checkout_help
-        return 0
-    fi
+	checkout_parse SHOW_HELP "${@}"
+	if $SHOW_HELP; then
+		checkout_help
+		exit 1
+	fi
 	
 	checkout_module(){
 		local dir="$1"
@@ -445,7 +738,7 @@ checkout() {
 	}
 	climb checkout_module --branches --leaves --up
 	
-	unset -f checkout_module -f checkout_help -f checkout_parse
+	unset -f checkout_module -f checkout_parse
 }
 
 pull() {
@@ -453,20 +746,6 @@ pull() {
 	local FORCE_REBASE=false
 	local FORCE_MERGE=false
 	
-	pull_help() {		
-		echo "For each module in .gitmodules gets the value of update (merge or rebase)	"
-		echo "to determine which type of pull it should do."
-		echo "If conflicts occurs during a pull it stops there (doesn't pull the whole project)."
-		echo "You must then solve the conflict for that specific project and pull gitmod pull again."
-		echo ""	
-		echo "The pull order is then trunk-->branches-->leaves"
-		echo ""
-		echo "Usage: gitmod [...] pull "
-		echo
-		echo "Options:"
-		echo "      -r | --rebase 		 forces pull --rebase for all module"
-		echo "      --merge | --no-rebase forces pull --no-rebase for all module"
-	}
 	pull_parse() {
 		local -n show_help_ref=$1
 		local -n force_rebase_ref=$2
@@ -531,14 +810,14 @@ pull() {
 	}
 	
 	pull_parse SHOW_HELP FORCE_REBASE FORCE_MERGE "${@}"
-    if $SHOW_HELP; then
-        pull_help
-        return 0
-    fi
+	if $SHOW_HELP; then
+		pull_help
+		exit 1
+	fi
 	
 	climb pull_module --trunk --branches --leaves --up
 	
-	unset -f pull_module -f pull_parse -f pull_help
+	unset -f pull_module -f pull_parse
 }
 
 add() {
@@ -547,22 +826,6 @@ add() {
 	local NOMODULE=false
 	local ALL=false
 	
-	add_help() {
-		echo "Add changes (all,module pointers only or all minus module pointers) to all modules."
-		echo "By default it adds all changes that aren't module."
-		echo "This is because one might be tricked into think that"
-		echo "gitmod add followed by git mod commit would have the"
-		echo "same effect as commit the whole local super repo."
-		echo "If you which to have this effect use  gitmod grow,"
-		echo "which add and commits leaves before add and commit branches."
-		echo ""
-		echo "Usage: gitmod [...] add [options] "
-		echo
-		echo "Options:"
-		echo "	   --no-module           only add changes that are not modules (default)"
-		echo "      -m | --module		 only add changes commits pointer of modules "
-		echo "      -a | --all   		 add all changes "
-	}
 	add_parse() {
 		local -n show_help_ref=$1
 		local -n module_ref=$2
@@ -619,10 +882,10 @@ add() {
 	}
 	
 	add_parse SHOW_HELP MODULE ALL NOMODULE "${@}"
-    if $SHOW_HELP; then
-        add_help
-        return 0
-    fi
+	if $SHOW_HELP; then
+		add_help
+		exit 1
+	fi
 	
 	if $MODULE ; then
 		climb add_module --branches --leaves --up
@@ -632,18 +895,12 @@ add() {
 		climb add_module --trunk --branches --leaves --up
 	fi
 	
-	unset -f add_module -f add_parse -f add_help
+	unset -f add_module -f add_parse 
 }
 
 # I'm avoiding collision with bash's reset function for now
 reset_modules() {
 	local SHOW_HELP=false
-	
-	reset_help() {
-		echo "Resets all modules (git reset)."
-		echo ""
-		echo "Usage: gitmod [...] reset "
-	}
 	
 	reset_parse() {
 		local -n show_help_ref=$1
@@ -675,59 +932,47 @@ reset_modules() {
 	}
 	
 	reset_parse SHOW_HELP "${@}"
-    if $SHOW_HELP; then
-        reset_help
-        return 0
-    fi
+	if $SHOW_HELP; then
+		reset_help
+		exit 1
+	fi
 	
 	climb reset_module --trunk --branches --leaves --up
 	
-	unset -f reset_module -f reset_parse -f reset_help
+	unset -f reset_module -f reset_parse
 }
 
 commit() {
-    local SHOW_HELP=false
-    local MESSAGE=""
+	local SHOW_HELP=false
+	local MESSAGE=""
 	local OPTIONS="--trunk --branches --leaves"
 
-    commit_help() {        
-        echo "Commit all staged changes in all modules with the same message."
-		echo ""
-        echo "Usage: gitmod [...] commit -m <message> [options]"
-        echo
-        echo "Options:"
-        echo "      -m <message>      Commit message"
-		echo "      --[no-]trunk		 "
-		echo "      --[no-]branch   	 "
-		echo "      --[no-]leaves   	 "
-    }
-
-    commit_parse() {
-        local -n show_help_ref=$1
-        local -n message_ref=$2
+	commit_parse() {
+		local -n show_help_ref=$1
+		local -n message_ref=$2
 		local -n options_ref=$3
-        shift 3
+		shift 3
 
-        # dir should normally have been declared globally but in case it hasn't
-        if [ -z "$dir" ] ; then
-            dir="."
-        fi
+		# dir should normally have been declared globally but in case it hasn't
+		if [ -z "$dir" ] ; then
+			dir="."
+		fi
 
-        while [[ $# -gt 0 ]]; do
-            case "$1" in
-                --help)
-                    show_help_ref=true
-                    shift
-                    ;;
-                -m | --message)
-                    if [[ -n "$2" && "$2" != -* ]]; then
-                        message_ref="$2"
-                        shift 2
-                    else
-                        echo "Error: -m requires a commit message."
-                        exit 1
-                    fi
-                    ;;
+		while [[ $# -gt 0 ]]; do
+			case "$1" in
+				--help)
+					show_help_ref=true
+					shift
+					;;
+				-m | --message)
+					if [[ -n "$2" && "$2" != -* ]]; then
+						message_ref="$2"
+						shift 2
+					else
+						echo "Error: -m requires a commit message."
+						exit 1
+					fi
+					;;
 				--trunk)
 					if [[ ! $options_ref =~ "--trunk" ]]; then
 						options_ref="${options_ref} --trunk"
@@ -757,40 +1002,40 @@ commit() {
 				--no-leaves)
 					options_ref=$(echo "${options_ref}" | sed 's/--leaves//g')
 					shift
-                ;;
-                *)
-                    echo "Unknown option: $1"
-                    exit 1
-                    ;;
-            esac
-        done
+				;;
+				*)
+					echo "Unknown option: $1"
+					exit 1
+					;;
+			esac
+		done
 		# Remove any leading or trailing whitespace
 		options_ref=$(echo "$options_ref" | xargs)
-    }
+	}
 
-    commit_module(){
-        local dir="$1"
-        local path="$2"
-        local name="$3"
+	commit_module(){
+		local dir="$1"
+		local path="$2"
+		local name="$3"
 
-        echo_colored "$path commit" "32" #green
-        git -C "$path" commit -m "$MESSAGE"
-    }
+		echo_colored "$path commit" "32" #green
+		git -C "$path" commit -m "$MESSAGE"
+	}
 
-    commit_parse SHOW_HELP MESSAGE OPTIONS "${@}"
-    if $SHOW_HELP; then
-        commit_help
-        return 0
-    fi
+	commit_parse SHOW_HELP MESSAGE OPTIONS "${@}"
+	if $SHOW_HELP; then
+		commit_help
+		exit 1
+	fi
 
-    if [ -z "$MESSAGE" ]; then
-        echo "Error: Commit message is required. Use -m <message> to provide a commit message."
-        return 1
-    fi
+	if [ -z "$MESSAGE" ]; then
+		echo "Error: Commit message is required. Use -m <message> to provide a commit message."
+		exit 1
+	fi
 
-    climb commit_module "$OPTIONS" --up
+	climb commit_module "$OPTIONS" --up
 
-    unset -f commit_module -f commit_parse -f commit_help
+	unset -f commit_module -f commit_parse
 }
 
 grow() {
@@ -800,18 +1045,7 @@ grow() {
 	local NOMODULE=false
 	local ALL=false
 	
-	grow_help() {
-		echo "Add and commit each modules leaves --> trunk "
-		echo ""
-		echo "Usage: gitmod [...] grow -m <message> [options] "
-		echo ""
-		echo "Options:"
-		echo "		-m | --message       commit message (mendatory) "
-		echo "      -a | --all   		 add all changes (default) "
-		echo "     --module		         only add changes commits pointer of modules "
-		echo "	   --no-module           only add changes that are not modules"
-		
-	}
+	
 	grow_parse() {
 		local -n show_help_ref=$1
 		local -n message_ref=$2
@@ -831,14 +1065,14 @@ grow() {
 					shift
 					;;
 				-m | --message)
-                    if [[ -n "$2" && "$2" != -* ]]; then
-                        message_ref="$2"
-                        shift 2
-                    else
-                        echo "Error: -m requires a commit message."
-                        exit 1
-                    fi
-                    ;;
+					if [[ -n "$2" && "$2" != -* ]]; then
+						message_ref="$2"
+						shift 2
+					else
+						echo "Error: -m requires a commit message."
+						exit 1
+					fi
+					;;
 				--module)
 					module_ref=true
 					shift
@@ -884,18 +1118,18 @@ grow() {
 			git -C "$path" add --all
 			git -C "$path" commit -m "$MESSAGE"
 		fi
-    }
+	}
 	
 	grow_parse SHOW_HELP MESSAGE MODULE ALL NOMODULE "${@}"
-    if $SHOW_HELP; then
-        grow_help
-        return 0
-    fi
+	if $SHOW_HELP; then
+		grow_help
+		exit 1
+	fi
 	
 	if [ -z "$MESSAGE" ]; then
-        echo "Error: Commit message is required. Use -m <message> to provide a commit message."
-        return 1
-    fi
+		echo "Error: Commit message is required. Use -m <message> to provide a commit message."
+		exit 1
+	fi
 	
 	if $MODULE ; then
 		climb grow_module --branches --leaves --down
@@ -907,5 +1141,104 @@ grow() {
 	fi
 	
 	
-	unset -f grow_module -f grow_parse -f grow_help -f add_module
+	unset -f grow_module -f grow_parse -f add_module
 }
+
+mute() {
+	local SHOW_HELP=false
+	local RED='31'
+	local GREEN='32'
+	local UNDO=false
+	local COMMAN=""
+	local MESSAGE=""
+	local SHOW=false
+	local CMDARGS=()
+	
+	mute_parse() {
+		local -n show_help_ref=$1
+		local -n undo_ref=$2
+		local -n show_ref=$3
+		local -n cmd_args_ref=$4
+
+		shift 4
+
+		if [ -z "$dir" ] ; then
+			dir="."
+		fi
+		
+		while [[ $# -gt 0 ]]; do
+			case "$1" in
+				--help)
+					show_help_ref=true
+					shift
+					;;
+				--undo)
+					undo_ref=true
+					shift
+					;;
+				--show)
+					show_ref=true
+					shift
+					;;
+				--*)
+					cmd_args_ref+=("$1")
+					shift
+					;;
+				-*)
+					cmd_args_ref+=("$1")
+					shift
+					;;
+				*)
+					echo "Unknown option: $1"
+					exit 1
+					;;
+			esac
+		done
+	}
+	
+	mute_cmd() {
+		git -C "$path" remote set-url --push origin no_push
+	}
+	
+	undo_cmd() {
+		pullurl="$(git -C "$path" remote get-url origin)"
+		git -C "$path" remote set-url --push origin "$pullurl"
+	}
+	
+	show_cmd() {
+		#pullurl="$(git -C "$path" remote get-url origin)"
+		#echo "pull : $pullurl"
+		pushurl="$(git -C "$path" remote get-url origin --push)"
+		echo "$pushurl"
+	}
+	
+	mute_parse SHOW_HELP UNDO SHOW CMDARGS "${@}"
+	if $SHOW_HELP; then
+		mute_help
+		exit 1
+	fi
+	
+	if $UNDO; then
+		COMMAND=undo_cmd
+		MESSAGE="Which module do we unmute ?"
+	elif $SHOW; then
+		COMMAND=show_cmd
+		MESSAGE="Showing push url."
+	else
+		COMMAND=mute_cmd
+		MESSAGE="Which module do we mute ?"	
+	fi 
+	
+	if ! $SHOW; then
+		gitmod prompt $COMMAND -m "$MESSAGE" "${CMDARGS[@]}"
+	else
+		gitmod prompt $COMMAND -m "$MESSAGE" --yes "${CMDARGS[@]}"
+	fi
+	
+	unset -f mute_tree -f mute_parse  -f mute_cmd -f undo_cmd -f show_cmd
+}
+
+gitmod "${@}"
+
+)
+
