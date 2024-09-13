@@ -3,9 +3,10 @@ git-monkey ()(
 # A big function using a subshell to separate scopes
 # This helps with exit 1 handling (just use error instead of error)
 # and makes all function and variables local
+WHITE='0'
 RED='31'
 GREEN='32'
-WHITE='0'
+YELLOW='33'
 CYAN='36'
 
 declare -i MAXDEPTH=5
@@ -621,7 +622,7 @@ git-monkey() {
 		
 		shift 5
 
-		local public_commands=("climb" "tree" "plant" "grow" "status" "prompt" "checkout" "pull" "push" "add" "reset" "commit" "mute")
+		local public_commands=("climb" "tree" "plant" "grow" "status" "prompt" "checkout" "pull" "push" "add" "reset" "commit" "mute" "DOS2UNIX")
 		local private_commands=("monkey_catch" "monkey_say" "error" "yes_no" "get_module_names" "get_module_key" "set_module_key")
 		local deprecated_commands=("spawn" "branch")
 
@@ -945,7 +946,7 @@ prompt() {
 		elif $ISLEAVES ; then
 			monkey_say "${indent}└── ${name} ($current_branch)" -n --pad "$PAD" --color "$GREEN"
 		else 
-			monkey_say "${indent}└── ${name} ($current_branch)" -n --pad "$PAD"
+			monkey_say "${indent}└── ${name} ($current_branch)" -n --pad "$PAD" --color "$YELLOW"
 		fi
 				
 		if $YALL ; then
@@ -1874,6 +1875,17 @@ branch() {
 	
 	unset -f parse -f command
 }
+
+DOS2UNIX() {
+	command() {
+		dos2unix "$1/.gitmodules"
+	}
+	
+	git-monkey prompt command --yes
+	
+	unset -f command
+}
+
 
 git-monkey "${@}"
 
