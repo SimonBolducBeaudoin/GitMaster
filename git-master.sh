@@ -391,16 +391,12 @@ monkey_say() {
 }
 
 error() {
-    local MESSAGE="" 
-    local LINE_NUMBER=""         
-	local THISFUNCERR=""         
+    local MESSAGE=""               
 	local OUT="GIT-MONKEY ERROR:"
 
     error_parse() {
         local -n message_ref=$1
-        local -n line_ref=$2
-		local -n this_function_error=$3
-        shift 3
+        shift 1
 
         while (( "$#" )); do
             case "$1" in
@@ -409,7 +405,6 @@ error() {
                         message_ref="$2"
                         shift 2
                     else
-						this_function_error="\n\t\t-m|--message requires a valid message."
                         return 1
                     fi
                     ;;
@@ -417,7 +412,7 @@ error() {
         done
     }
 
-    error_parse MESSAGE LINE_NUMBER THISFUNCERR "$@"
+    error_parse MESSAGE "$@"
 
 	if [ -n "$MESSAGE" ] ; then
 		OUT+="\n\n"
@@ -489,7 +484,7 @@ yes_no() {
                         msg_ref="$2"
                         shift 2
                     else
-                        error -m "Error: -m|--message requires a message."
+                        error -m "-m|--message requires a message."
                     fi
                     ;;
                 -p|--pad)
@@ -497,7 +492,7 @@ yes_no() {
                         pad_ref="$2"
                         shift 2
                     else
-                        error -m "Error: -p|--pad requires padding value."
+                        error -m "-p|--pad requires padding value."
                     fi
                     ;;
                 --maxpad)
@@ -505,7 +500,7 @@ yes_no() {
                         max_pad_ref="$2"
                         shift 2
                     else
-                        error -m "Error: --maxpad requires a maximum padding value."
+                        error -m "--maxpad requires a maximum padding value."
                     fi
                     ;;
                 *)
@@ -972,7 +967,7 @@ prompt() {
 		error -m "No function given to prompt. Nothing to do." 
 	fi
 	
-	printf "$MESSAGE " -n
+	printf "$MESSAGE \n" 
 	git-monkey climb prompt_tree --trunk --branches --leaves --up
 	
 	unset -f prompt_tree -f prompt_parse
@@ -983,6 +978,7 @@ plant() {
 	local BRANCH=""
 	local NEWTREEPATH=".."
 	local LASTOUTPUT=""
+	local answer=''
 	
 	local non_flag_args=0
 	
@@ -1082,18 +1078,17 @@ plant() {
 		local answer=''
 		local -i max_length=50
 		local -i PAD=$((DEPTH*4))
-
-		current_branch=$(git -C "$dir/$path" rev-parse --abbrev-ref HEAD)
 		if $ISTRUNK ; then
+			current_branch=$(git -C "$dir/$path" rev-parse --abbrev-ref HEAD)
 			repo_path=$(git -C "$dir/$path" rev-parse --show-toplevel)
 			repo_name=$(basename "$repo_path")
 			monkey_say "${repo_name} ($current_branch)" -n --pad "$PAD" --color "$RED"
 		else
 			branch=$(get_module_key "$dir/.gitmodules" "$name" "branch")
 			if [ -n "$branch" ]; then
-				message="└── ${name} ($current_branch) [$branch]"
+				message="└── ${name} () [$branch]"
 			else 
-				message="└── ${name} ($current_branch) []"
+				message="└── ${name} () []"
 			fi
 			monkey_say "${message}" -n --pad "$PAD" --color "$CYAN"
 			
@@ -1109,29 +1104,47 @@ plant() {
 		exit 1
 	fi
 	
-	# SETUP THE NEW WORKTREE ####################################
-	# Get the current repo's name
 	repo_path=$(git -C "$dir" rev-parse --show-toplevel)
 	repo_name=$(basename "$repo_path")
 	
 	local worktree_path="$dir/$NEWTREEPATH/${repo_name}_$BRANCH"
 		
-	monkey_say "Planting branch '$BRANCH' at location '$worktree_path' " -n --color "$CYAN"
+	answer="$(yes_no -m "Create new $BRANCH worktree ?"  -d Y )"
+	if $answer ; then
+		monkey_say "Planting branch '$BRANCH' at location '$worktree_path' " -n --color "$CYAN"
+		LASTOUTPUT="$(git worktree add "$worktree_path" "$BRANCH" 2>&1)"
+		if [ "$?" != 0 ] ; then
+			error -m "$LASTOUTPUT" 
+		fi
+	fi
 	
-	LASTOUTPUT="$(git worktree add "$worktree_path" "$BRANCH" 2>&1)"
-	if [ "$?" != 0 ] ; then
-		error -m "$LASTOUTPUT" 
-	fi	
-	# set the directory to the new worktree
-	cd "$worktree_path" # The command line now displays the worktree as the current branch
 	
-	monkey_say --color "$CYAN" --pad "2" " Change directory to: $(pwd) \n To activate the $BRANCH branch." -n
-	echo ""
-	
+	cd "$worktree_path" 
 	dir="." 
-	#############################################################
 	
-	git-monkey climb plant_tree --init --trunk --branches --leaves --up
+	answer="$(yes_no -m "Initialize and setup submodules ?"  -d Y )"
+	if $answer ; then
+		git-monkey climb plant_tree --init --trunk --branches --leaves --up
+	fi
+	
+	answer="$(yes_no -m "Are there submodules's to protect from being pushed/mutes ? "  -d Y )"
+	if $answer ; then
+		git-monkey mute
+	fi
+	
+	monkey_say "INITIALIZATION DONE ! " -n --color "$CYAN" 
+	git-monkey tree
+	
+	answer="$(yes_no -m "Commit changes ? "  -d N )"
+	if $answer ; then
+		git-monkey DOS2UNIX
+		git-monkey grow -m "$BRANCH worktree initialization."
+	fi
+	
+	answer="$(yes_no -m "Push ? "  -d N )"
+	if $answer ; then
+		git-monkey push
+	fi
 	
 	unset -f plant_tree -f plant_parse -f set_branch -f init_module
 }
@@ -1338,8 +1351,6 @@ push() {
 		local -n force_ref=$2
 		shift 2
 		
-
-		
 		while [[ $# -gt 0 ]]; do
 			case "$1" in
 				--help)
@@ -1373,9 +1384,9 @@ push() {
 		fi
 		
 		if [ "$FORCE" != true ] ; then
-			LASTOUTPUT="$(git -C "$dir/$path" push) 2>&1"
+			LASTOUTPUT="$(git -C "$dir/$path" push 2>&1)"
 		elif [ "$FORCE" == true ] ; then
-			LASTOUTPUT="$(git -C "$dir/$path" push --force) 2>&1"
+			LASTOUTPUT="$(git -C "$dir/$path" push --force 2>&1)"
 		fi
 		
 		if [ "$?" != 0 ] ; then
@@ -1387,7 +1398,7 @@ push() {
 	
 	push_parse SHOW_HELP FORCE "${@}"
 	if $SHOW_HELP; then
-		pull_help
+		push_help
 		exit 1
 	fi
 	
