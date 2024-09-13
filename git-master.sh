@@ -1,41 +1,57 @@
 #!/bin/bash
-gitmod ()(
+git-monkey ()(
 # A big function using a subshell to separate scopes
-# This helps with error handling (just use exit 1 instead of exit 1)
+# This helps with exit 1 handling (just use error instead of error)
 # and makes all function and variables local
+RED='31'
+GREEN='32'
+WHITE='0'
+CYAN='36'
 
-gitmod_help() {
+declare -i MAXDEPTH=5
+declare -i DEPTH=0
+
+ISTRUNK=false
+ISLEAVES=false
+
+SUBMODULE_NAME='^[[:space:]]*\\[submodule[[:space:]]*\"(.+)\"[[:space:]]*\\][[:space:]]*$'
+TRIM='^[[:space:]]+|[[:space:]]+$'
+COMMENT='^[[:space:]]*#'
+
+git-monkey_help() {
 local help_message="
 An extension of git for projects with git modules.
 
-Usage: gitmod [-h | --help] [-C <path>] <command> [<args>]
+Usage: git-monkey [-h | --help] [-C <path>] <command> [<args>]
 
 These are the supported commands for now :
-  tree        prints the tree of modules
+  tree   prints the tree of modules
   climb       Helps to recursively iterate over modules
   grow        Add and commit from leaves to trunk
+  status 	  prints short status of modules	
   checkout    Checkouts the branches defined in .gitmodules (trunk first)
   pull        pulls and stop at conflicts (trunk first)
+  push 	      push and stop at git push errors (leaves first)
   add         Adds files to the index for each module (leaves first)
   reset       git reset all modules
   commit      Record changes to the rep4Zository for each module and stops at conflicts (leaves first)
 
 Example usage:
   # The tree of modules as a trunk branches and leaves
-  gitmod tree
+  git-monkey tree
   
   # climb is similar but more powerful than git submodule --foreach
-  gitmod climb --help
+  git-monkey climb --help
   
   # Resolving detached head states for each modules
-  gitmod checkout -C /path/to/repo 
+  git-monkey checkout -C /path/to/repo 
   
   # Getting updates
-  gitmod pull --rebase
+  git-monkey pull --rebase
   
   # Only committing commit pointers (aka the state of each module)
-  gitmod add -C /path/to/repo --modules
-  gitmod commit -m 'Updating modules'
+  git-monkey add -C /path/to/repo --modules
+  git-monkey commit -m 'Updating modules'
 	"
 	echo "$help_message"
 }
@@ -45,7 +61,7 @@ local help_message="
 A helper to iterate over a tree of git modules.
 Climbing up or down the tree of git modules calling <func> every step of the way.
 
-Usage: gitmod [...] climb <func> [options]
+Usage: git-monkey [...] climb <func> [options]
 
 Options:
 	  --leaves                Execute on leaves (default is false)
@@ -57,24 +73,24 @@ Options:
 
 Help:
 To see what trunk, branches, and leaves are, call
-	gitmod tree.
+	git-monkey tree.
 When using --trunk, func will be called on the trunk using \$path=\$dir (i.e. trunk has no parents).
 
 Examples:
 
-	# Use git -C \$path to call git in the current submodule (inside the current module)
+	# Use git -C $dir/$path to call git in the current submodule (inside the current module)
 	dummy() {
 		# Climb will recursively call this function in each module
 		dir='\$1'    # \$1 is the directory of that module
 		path='\$2'   # \$2 is the path towards the current submodule (inside module)
 		name='\$3'   # \$3 is the name of the current submodule (inside module)
 		echo ' Module \$3 in directory \$1 '
-		git -C '\$path' log --all --decorate --oneline --graph -n1
+		git -C '$dir/$path' log --all --decorate --oneline --graph -n1
 	}
-	gitmod climb dummy --trunk --leaves --down
+	git-monkey climb dummy --trunk --leaves --down
 
 	# use get_module_key '.../gitmodules' '\$name' 'key'
-	# to read the current module's .gitmodule file
+	# to read the current module's .gitmodules file
 	# and get the value (of key) for the current submodule
 	# The keys path and url are mandatory (git submodule rules)
 	# And the keys branch and update can be defined by the user.
@@ -85,16 +101,50 @@ Examples:
 		url=\$(get_module_key "\$dir/.gitmodules" "\$name" "url")
 		echo '\$name : \$url'
 	}
-	gitmod climb say_url --trunk --branches --leaves --up
+	git-monkey climb say_url --trunk --branches --leaves --up
 	"
 	echo "$help_message"
 }
 
-tree_help() {
-local help_message="	
-Shows the module tree.
-Usage: gitmod [...] tree"
-	echo "$help_message"
+monkey_catch_help() {
+    local help_message="
+Usage: monkey_catch [options] <command>
+
+Options:
+  -h, --help       Show this help message and exit.
+  -p, --pad        Set padding before the formatted text. Example: -p 10
+  -c, --color      Set text color using ANSI color codes. Example: -c 32 (green)
+  --maxpad         Set the maximum padding value. Example: --maxpad 50
+
+Description:
+  Executes a command and prints its output with optional padding and color.
+  The command's output is padded and colored according to the specified options.
+
+Examples:
+  monkey_catch -p 5 -c 31 --maxpad 40 'echo Error: %s' 'File not found'
+  monkey_catch --maxpad 30 'ls -l'
+"
+
+    echo "$help_message"
+}
+
+
+plant_help() {
+local help_message="
+Plants a new (git) worktree based on an existing branch of the project,
+and prompts the user to setup all the .gitmodules files for that new worktree
+and initialize all submodules during this process.
+
+In the end the user as a new worktree that is all setup for that branch.
+Ex: if you'd want a worktree that contains your devel branch (and all its devel submodules).
+ 
+Usage: git-monkey [...] plant <branch> [options]
+
+Options:
+	  --path		The default path is '..' and the worktree gets named '../projectname_branch' automatically
+	  --help        Display this help message
+" 
+echo "$help_message"
 }
 
 checkout_help() {
@@ -104,7 +154,7 @@ and then call 'git checkout branch' for that module.
 It doesn't checkout the trunk.
 The checkout order is then branches-->leaves
 
-Usage: gitmod [...] checkout"
+Usage: git-monkey [...] checkout"
 echo "$help_message"
 }
 
@@ -113,11 +163,25 @@ local help_message="
 For each module in .gitmodules gets the value of update (merge or rebase)	
 to determine which type of pull it should do.
 If conflicts occurs during a pull it stops there (doesn't pull the whole project).
-You must then solve the conflict for that specific project and pull gitmod pull again.
+You must then solve the conflict for that specific project and git-monkey pull again.
 	
 The pull order is then trunk-->branches-->leaves
 
-Usage: gitmod [...] pull 
+Usage: git-monkey [...] pull [options]
+
+Options:
+      -r | --rebase 		 forces pull --rebase for all module
+      --merge | --no-rebase forces pull --no-rebase for all module"
+echo "$help_message"
+}
+
+push_help() {
+local help_message="
+Pushes modules one by one (leaves-->branches-->trunk)
+If an erro occurs it stops there (doesn't push the whole project).
+You must then solve the problem for that module and git-monkey push again.
+
+Usage: git-monkey [...] pull [options]
 
 Options:
       -r | --rebase 		 forces pull --rebase for all module
@@ -130,12 +194,12 @@ local help_message="
 Add changes (all,module pointers only or all minus module pointers) to all modules.
 By default it adds all changes that aren't module.
 This is because one might be tricked into think that
-gitmod add followed by git mod commit would have the
+git-monkey add followed by git mod commit would have the
 same effect as commit the whole local super repo.
-If you which to have this effect use  gitmod grow,
+If you which to have this effect use  git-monkey grow,
 which add and commits leaves before add and commit branches.
 
-Usage: gitmod [...] add [options] 
+Usage: git-monkey [...] add [options] 
 	echo
 Options:
 	   --no-module           only add changes that are not modules (default)
@@ -148,7 +212,7 @@ reset_help() {
 local help_message="
 Resets all modules (git reset).
 
-Usage: gitmod [...] reset "
+Usage: git-monkey [...] reset "
 echo "$help_message"
 }
 
@@ -156,7 +220,7 @@ commit_help() {
 local help_message="
 Commit all staged changes in all modules with the same message.
 
-Usage: gitmod [...] commit -m <message> [options]
+Usage: git-monkey [...] commit -m <message> [options]
 		echo
 Options:
       -m <message>      Commit message
@@ -170,7 +234,7 @@ grow_help() {
 local help_message="
 Add and commit each modules leaves --> trunk 
 
-Usage: gitmod [...] grow -m <message> [options] 
+Usage: git-monkey [...] grow -m <message> [options] 
 
 Options:
 		-m | --message       commit message (mendatory) 
@@ -185,10 +249,29 @@ local help_message="
 Prevents to push to origin by setting origin url to no_push.
 Goes through each module one by one prompting (Y/N) if the module should be muted.
 
-Usage: gitmod [...] mute [options]
+Usage: git-monkey [...] mute [options]
 
 Options :
 		--undo 			Reset the push url to be equal to the pull url.
+		--show 			Show what is the push url.
+"
+echo "$help_message"
+}
+
+status_help() {
+local help_message="
+Display a short status for each modules
+
+Usage: git-monkey [...] status
+"
+echo "$help_message"
+}
+
+branch_help() {
+local help_message="
+Display a the complete list of branches for each modules
+
+Usage: git-monkey [...] branch
 "
 echo "$help_message"
 }
@@ -197,57 +280,266 @@ prompt_help() {
 local help_message="
 Promts the user (Y/N) one module at a time to trigger some given action (func).
  
-Usage: gitmod [...] prompt func [options]" 
+Usage: git-monkey [...] prompt func [options]" 
 echo "$help_message"
 }
 
-echo_colored() {
-	# see ANSI color codes
-	local message="$1" # Message to print
-	local color="$2"   # Color code
-	echo -e "\e[${color}m${message}\e[0m"
+
+monkey_catch() {
+    local SHOW_HELP=false
+    local PADDING=0
+    local COLOR=0
+    local MAX_PADDING=50
+    local COMMANDS=()
+    local OUTPUT=""
+    local EXTRA_LINE=false
+	local SHOW_COMMAND=false
+	local CMDOUT=""
+
+    monkey_catch_parse() {
+        local -n show_help_ref=$1
+        local -n pad_ref=$2
+        local -n clr_ref=$3
+        local -n max_pad_ref=$4
+        local -n cmds_ref=$5
+        local -n extra_line_ref=$6
+        local -n showcmd_ref=$7
+
+        shift 7
+
+        while (( "$#" )); do
+            case "$1" in
+                -h|--help)
+                    show_help_ref=true
+                    shift
+                    ;;
+                -p|--pad)
+                    if [[ -n "$2" && "$2" != -* ]]; then
+                        pad_ref="$2"
+                        shift 2
+                    else
+                        error -m "-p|--pad requires padding value."
+                    fi
+                    ;;
+                -c|--color)
+                    if [[ -n "$2" && "$2" != -* ]]; then
+                        clr_ref="$2"
+                        shift 2
+                    else
+                        error -m "-c|--color requires an ANSI color number."
+                    fi
+                    ;;
+                --maxpad)
+                    if [[ -n "$2" && "$2" != -* ]]; then
+                        max_pad_ref="$2"
+                        shift 2
+                    else
+                        error -m "--maxpad requires a maximum padding value."
+                    fi
+                    ;;
+                -n|--extra-line)
+                    extra_line_ref=true
+                    shift
+                    ;;
+				--cmd|--show_command)
+                    showcmd_ref=true
+                    shift
+                    ;;
+                *)
+                    cmds_ref+=("$1")
+                    shift 
+                    ;;
+            esac
+        done
+    }
+
+    monkey_catch_parse SHOW_HELP PADDING COLOR MAX_PADDING COMMANDS EXTRA_LINE SHOW_COMMAND "$@"
+
+    if $SHOW_HELP ; then
+        monkey_catch_help
+        exit 1
+    fi
+
+    if (( PADDING > MAX_PADDING )); then
+        PADDING=$MAX_PADDING
+    fi
+    if (( PADDING < 0 )); then
+        PADDING=0
+    fi
+	
+	if $SHOW_COMMAND ; then
+        CMDOUT="$(printf '%s' "${COMMANDS[@]}")"
+		CMDOUT=$(printf "%s" "$CMDOUT" | awk -v pad="$PADDING" '{ printf "%*s%s\n", pad, "", $0 }')
+		printf "\e[${COLOR}m%s\e[0m\n" "$CMDOUT"
+    fi
+    OUTPUT="$("${COMMANDS[@]}" 2>&1)"
+    OUTPUT=$(printf "%s" "$OUTPUT" | awk -v pad="$PADDING" '{ printf "%*s%s\n", pad, "", $0 }')
+
+    if $EXTRA_LINE; then
+        printf "\e[${COLOR}m%s\e[0m\n" "$OUTPUT"
+    else
+        printf "\e[${COLOR}m%s\e[0m" "$OUTPUT"
+    fi
+
+    unset -f monkey_catch_parse
+}
+	
+
+monkey_say() {
+    monkey_catch printf "$@"
 }
 
-get_yes_no() {
-	local prompt answer default
+error() {
+    local MESSAGE="" 
+    local LINE_NUMBER=""         
+	local THISFUNCERR=""         
+	local OUT="GIT-MONKEY ERROR:"
 
-	while [[ $# -gt 0 ]]; do
-		case "$1" in
-			-d|--default)
-				if [[ "$2" =~ ^[YyNn]$ ]]; then
-					default="$2"
-					shift 2
-				else
-					echo "Invalid default value. Use 'Y' or 'N'."
-					exit 1
-				fi
-				;;
-			*)
-				prompt="$*"
-				break
-				;;
-		esac
-	done
+    error_parse() {
+        local -n message_ref=$1
+        local -n line_ref=$2
+		local -n this_function_error=$3
+        shift 3
 
-	while true; do
-		if [ -n "$default" ]; then
-			read -rp "$prompt (Y/N) [${default}]: " answer
-			answer="${answer:-$default}"
-		else
-			read "$prompt (Y/N): " answer
-		fi
-		
-		case "$answer" in
-			[Yy]* ) echo true; return 0;;
-			[Nn]* ) echo false; return 0;;
-			* ) echo "" ; echo -n "Please answer Y or N.";;
-		esac
-	done
+        while (( "$#" )); do
+            case "$1" in
+                -m|--message)
+                    if [[ -n "$2" && "$2" != -* ]]; then
+                        message_ref="$2"
+                        shift 2
+                    else
+						this_function_error="\n\t\t-m|--message requires a valid message."
+                        return 1
+                    fi
+                    ;;
+            esac
+        done
+    }
+
+    error_parse MESSAGE LINE_NUMBER THISFUNCERR "$@"
+
+	if [ -n "$MESSAGE" ] ; then
+		OUT+="\n\n"
+		OUT+="$MESSAGE"
+		OUT+="\n\n"
+	fi
+	
+	local i
+    local frame_count=${#FUNCNAME[@]}
+	
+	local max_file_name_length=0
+    local max_func_name_length=0
+	
+	for ((i=1; i<frame_count; i++)); do
+        local file_name="${BASH_SOURCE[$i]}"
+        local func_name="${FUNCNAME[$i]}"
+
+        # Update maximum lengths
+        [[ ${#file_name} -gt max_file_name_length ]] && max_file_name_length=${#file_name}
+        [[ ${#func_name} -gt max_func_name_length ]] && max_func_name_length=${#func_name}
+    done
+	
+	local file_name_width=$((max_file_name_length + 1))
+    local func_name_width=$((max_func_name_length + 1))
+	
+	(( file_name_width < 9 )) && file_name_width=9
+    (( func_name_width < 13 )) && func_name_width=13
+	
+	# OUT+="\n"
+	# OUT+="Error trace:"
+    OUT+="$(printf "\n%-${file_name_width}s %-${func_name_width}s %s" "File Name" "Function Name" "Line (Not reliable)")\n"
+    OUT+="$(printf "%-${file_name_width}s %-${func_name_width}s %s" "---------" "-------------" "----")\n"
+
+    for ((i=1; i<frame_count; i++)); do
+        OUT+="$(printf "%-${file_name_width}s %-${func_name_width}s %s" "${BASH_SOURCE[$i]}" "${FUNCNAME[$i]}" "${BASH_LINENO[$((i-1))]}")\n"
+    done
+	
+    printf "\e[31m%s\e[0m\n" "$(printf "$OUT")"
+    exit 1
 }
 
-SUBMODULE_NAME='^[[:space:]]*\\[submodule[[:space:]]*\"(.+)\"[[:space:]]*\\][[:space:]]*$'
-TRIM='^[[:space:]]+|[[:space:]]+$'
-COMMENT='^[[:space:]]*#'
+yes_no() {
+    local message=""
+    local answer=""
+    local default
+    local PADDING=0
+    local MAX_PADDING=50
+
+    get_yes_no_parse() {
+        local -n msg_ref=$1
+        local -n def_ref=$2
+        local -n pad_ref=$3
+        local -n max_pad_ref=$4
+
+        shift 4
+
+        while (( "$#" )); do
+            case "$1" in
+                -d|--default)
+                    if [[ "$2" =~ ^[YyNn]$ ]]; then
+                        def_ref="$2"
+                        shift 2
+                    else
+                        error -m "Invalid default value. Use 'Y' or 'N'."
+                    fi
+                    ;;
+                -m|--message)
+                    if [[ -n "$2" && "$2" != -* ]]; then
+                        msg_ref="$2"
+                        shift 2
+                    else
+                        error -m "Error: -m|--message requires a message."
+                    fi
+                    ;;
+                -p|--pad)
+                    if [[ -n "$2" && "$2" != -* ]]; then
+                        pad_ref="$2"
+                        shift 2
+                    else
+                        error -m "Error: -p|--pad requires padding value."
+                    fi
+                    ;;
+                --maxpad)
+                    if [[ -n "$2" && "$2" != -* ]]; then
+                        max_pad_ref="$2"
+                        shift 2
+                    else
+                        error -m "Error: --maxpad requires a maximum padding value."
+                    fi
+                    ;;
+                *)
+                    error -m "Unknown option: $1" 
+                    ;;
+            esac
+        done
+    }
+
+    get_yes_no_parse message default PADDING MAX_PADDING "$@"
+
+    if (( PADDING > MAX_PADDING )); then
+        PADDING=$MAX_PADDING
+    fi
+    if (( PADDING < 0 )); then
+        PADDING=0
+    fi
+
+	message="$(printf "%*s${message}" "$PADDING")"
+    while true; do
+        if [ -n "$default" ]; then
+            read -rp "$message (Y/N) [${default}]: " answer
+            answer="${answer:-$default}"
+        else
+            read -rp "$message (Y/N): " answer
+        fi
+
+        case "$answer" in
+            [Yy]* ) echo true; return 0;;
+            [Nn]* ) echo false; return 0;;
+            * ) ;;
+        esac
+    done
+}
+
 
 get_module_names(){
 	local file="$1"
@@ -272,18 +564,66 @@ get_module_key(){
 	awk -F= -v table_name="$name" -v key="$key" -v table_head="$SUBMODULE_NAME" -v trim_reg="$TRIM" -v comment="$COMMENT" "$awk_prgm" "$file"
 }
 
-gitmod() {
+set_module_key() {
+    local file="$1"
+    local name="$2"
+    local key="$3"
+    local new_value="$4"
+    
+    local temp_file=$(mktemp)
+    
+    awk_prgm='
+    BEGIN { in_table = 0; found_key = 0 }
+    function trim(str) { gsub(trim_reg, "", str); return str }
+    match($0, table_head, matches) {
+        if (matches[1] == table_name) {
+            in_table = 1
+        } else if (in_table == 1) {
+            if (found_key == 0) {
+                print "\t" key " = " new_value
+            }
+            in_table = 0
+        }
+    }
+    {
+        if (in_table && trim($1) == key) {
+            found_key = 1
+            sub($2, new_value)
+            print $1 "= " $2
+        } else {
+            print $0
+        }
+    }
+    END {
+        if (in_table && found_key == 0) {
+            print "\t" key " = " new_value
+        }
+    }
+    '
+    
+    awk -F= -v table_name="$name" -v key="$key" -v new_value="$new_value" -v table_head="$SUBMODULE_NAME" -v trim_reg="$TRIM" "$awk_prgm" "$file" > "$temp_file"
+    mv "$temp_file" "$file"
+}
+
+git-monkey() {
 	local dir="."
 	local command=""
 	local CMDARGS=()
+	local PRIVATEMODE=false
+	local DEPRECATEDMODE=false
 		
-	gitmod_parse() {
+	git-monkey_parse() {
 		local -n dir_ref=$1
 		local -n command_ref=$2
 		local -n cmd_args_ref=$3
-		shift 3
+		local -n privatemode_ref=$4
+		local -n deprecatedmode_ref=$5
+		
+		shift 5
 
-		local valid_commands=("tree" "climb" "prompt" "grow" "checkout" "pull" "add" "reset" "commit" "mute")
+		local public_commands=("climb" "tree" "plant" "grow" "status" "prompt" "checkout" "pull" "push" "add" "reset" "commit" "mute")
+		local private_commands=("monkey_catch" "monkey_say" "error" "yes_no" "get_module_names" "get_module_key" "set_module_key")
+		local deprecated_commands=("spawn" "branch")
 
 		while (( "$#" )); do
 			case "$1" in
@@ -295,6 +635,14 @@ gitmod() {
 					cmd_args_ref+=("--help")
 					shift
 					;;
+				--private)
+					privatemode_ref=true
+					shift
+					;;
+				--deprecated)
+					deprecatedmode_ref=true
+					shift
+					;;	
 				--*)
 					cmd_args_ref+=("$1")
 					shift
@@ -305,7 +653,11 @@ gitmod() {
 					;;	
 				*)
 					if [ -z "$command_ref" ]; then
-						if [[ " ${valid_commands[@]} " =~ " $1 " ]]; then
+						if [[ " ${public_commands[@]} " =~ " $1 " ]]; then
+							command_ref="$1"
+						elif [[ " ${private_commands[@]} " =~ " $1 " && "$privatemode_ref" == true ]]; then
+							command_ref="$1"
+						elif [[ " ${deprecated_commands[@]} " =~ " $1 " && "$deprecatedmode_ref" == true ]]; then
 							command_ref="$1"
 						else
 							echo "Invalid command: $1"
@@ -323,18 +675,61 @@ gitmod() {
 		done
 	}
 
-	gitmod_parse dir command CMDARGS "$@"
+	git-monkey_parse dir command CMDARGS PRIVATEMODE DEPRECATEDMODE "$@"
 
 	if [ -z "$command" ] ; then
-	   gitmod_help
+	   git-monkey_help
 	   exit 1
+	fi
+	
+	if [ PRIVATEMODE == true ]; then
+	   monkey_say "######################\n PRIVATE MODE: \n ######################" -n --color "$CYAN"
+	fi
+	
+	if [ PRIVATEMODE == true ]; then
+	   monkey_say "######################\n DEPRECATED MODE: \n ######################" -n --color "$RED"
 	fi
 	
 	# Execute the command with the collected flags
 	"$command" "${CMDARGS[@]}"
 	
-	unset -f gitmod_parse
+	unset -f git-monkey_parse
 }
+
+spawn() {
+	local SHOW_HELP=false
+	
+	parse() {
+		local -n show_help_ref=$1
+
+		shift 1
+		
+		while [[ $# -gt 0 ]]; do
+			case "$1" in
+				--help)
+					show_help_ref=true
+					shift
+					;;
+				*)
+					error -m "Unknown option: $1"
+					;;
+			esac
+		done
+	}
+	
+	parse SHOW_HELP "${@}"
+	if $SHOW_HELP; then
+		status_help
+		exit 1
+	fi
+	
+	git -C "$dir" submodule update --init --recursive
+	git-monkey checkout
+	git-monkey tree
+	
+	unset -f parse
+}
+
 
 climb() {
 	local func=""
@@ -343,11 +738,7 @@ climb() {
 	local TRUNK=false
 	local UPWARD=true
 	local SHOW_HELP=false
-	
-	local ISTRUNK=false
-	local ISLEAVES=false
-	local -i DEPTH=0
-	local -i MAXDEPTH=5
+	local INITIALIZATION=false
 	
 	climb_parse() {
 		local -n leaves_ref=$1
@@ -356,15 +747,11 @@ climb() {
 		local -n upward_ref=$4
 		local -n show_help_ref=$5
 		local -n func_ref=$6
+		local -n init_ref=$7
 		
 		local non_flag_args=0
 
-		shift 6
-
-		#dir should normally have been declared globally but in case it asn't
-		if [ -z "$dir" ] ; then
-			dir="."
-		fi
+		shift 7
 		
 		while [[ $# -gt 0 ]]; do
 			case "$1" in
@@ -388,19 +775,22 @@ climb() {
 					upward_ref=false
 					shift
 					;;
+				--init|--initialization)
+					upward_ref=true
+					init_ref=true
+					shift
+					;;
 				--help)
 					show_help_ref=true
 					shift
 					;;
 				-*)
-					echo "Unknown option: $1"
-					exit 1
+					error -m "Unknown option: $1"
 					;;
 				*)
 					non_flag_args=$((non_flag_args + 1))
 					if [[ $non_flag_args -gt 1 ]]; then
-						echo "Unknown option: $1"
-						exit 1
+						error -m "Unknown option: $1"
 					fi
 					func_ref="$1"
 					shift
@@ -414,18 +804,18 @@ climb() {
 		local dir="$2"
 		local path="$3"
 		local module="$4"
+		local branching_up=false	
+		
 		
 		 (( DEPTH += 1 ))
 		
 		if (( DEPTH > MAXDEPTH )); then
-			echo "Max depth reached in $dir"
-			exit 1
+			error -m "Max depth reached in $dir"
 		fi
 		
 		# On the way up
-		if (( DEPTH > 0 ))	&& $UPWARD && [ -f "$dir/$path/.gitmodules" ] && $BRANCHES ; then
-			"$func" "$dir" "$dir/$path" "$module"
-			
+		if (( DEPTH > 0 ))	&& $UPWARD && [[ $INITIALIZATION == true || -f "$dir/$path/.gitmodules" ]] && $BRANCHES ; then
+			"$func" "$dir" "$path" "$module"
 		fi
 		
 		if [ -f "$dir/$path/.gitmodules" ] ; then
@@ -438,23 +828,22 @@ climb() {
 				local subpath="$(get_module_key "$dir/$path/.gitmodules" "$name" "path")"
 				climbing "$func" "$dir/$path" "$subpath" "$name"
 			done
-		elif $LEAVES && (( DEPTH < MAXDEPTH )); then
+		elif $LEAVES && (( DEPTH < MAXDEPTH )) && [ $INITIALIZATION == false ]; then
 			ISLEAVES=true
-		   "$func" "$dir" "$dir/$path" "$module"
+		   "$func" "$dir" "$path" "$module"
 			ISLEAVES=false			
 			
 		fi
 		
 		# On the way down
 		if (( DEPTH > 0 ))	&& ! $UPWARD && [ -f "$dir/$path/.gitmodules" ] && $BRANCHES ; then
-			"$func" "$dir" "$dir/$path" "$module"
-			
+			"$func" "$dir" "$path" "$module"	
 		fi
 		
 		(( DEPTH -= 1 ))
 	}
 	
-	climb_parse LEAVES BRANCHES TRUNK UPWARD SHOW_HELP func "${@}"
+	climb_parse LEAVES BRANCHES TRUNK UPWARD SHOW_HELP func INITIALIZATION "${@}"
 		
 	if $SHOW_HELP; then
 		climb_help
@@ -464,8 +853,7 @@ climb() {
 	if $TRUNK && $UPWARD; then
 		ISTRUNK=true
 		"$func" "$dir" "$dir" "Trunk"
-		ISTRUNK=false
-		
+		ISTRUNK=false		
 	fi
 	
 	# Now it's time to start climbinb fr
@@ -478,7 +866,6 @@ climb() {
 			local name="${names[$i]}"
 			local path="$(get_module_key "$dir/.gitmodules" "$name" "path")"
 			climbing "$func" "$dir" "$path" "$name"
-			
 		done
 	fi
 	
@@ -486,16 +873,13 @@ climb() {
 		ISTRUNK=true
 		"$func" "$dir" "$dir" "Trunk"
 		ISTRUNK=false
-		
 	fi	
-	 
+	
 	unset -f climbing -f climb_parse
 }
 
 prompt() {
 	local SHOW_HELP=false
-	local RED='31'
-	local GREEN='32'
 	local MESSAGE=""
 	local FUNC=""
 	local YALL=false
@@ -509,11 +893,7 @@ prompt() {
 		local non_flag_args=0
 
 		shift 4
-		
-		if [ -z "$dir" ] ; then
-			dir="."
-		fi
-		
+				
 		while [[ $# -gt 0 ]]; do
 			case "$1" in
 				--help)
@@ -525,8 +905,7 @@ prompt() {
 						message_ref="$2"
 						shift 2
 					else
-						echo "Error: -m requires a commit message."
-						exit 1
+						error -m "-m requires a message."
 					fi
 					;;
 				-y | --yes)
@@ -534,14 +913,12 @@ prompt() {
 					shift
 					;;
 				-*)
-					echo "Unknown option: $1"
-					exit 1
+					error -m "Unknown option: $1"
 					;;
 				*)
 					non_flag_args=$((non_flag_args + 1))
 					if [[ $non_flag_args -gt 1 ]]; then
-						echo "Unknown option: $1"
-						exit 1
+						error -m "Unknown option: $1"
 					fi
 					func_ref="$1"
 					shift
@@ -551,62 +928,36 @@ prompt() {
 	}
 	
 	prompt_tree(){
-		local depth=$DEPTH #defined in climb
 		local dir="$1"
 		local path="$2"
 		local name="$3"
 		local answer=false
 		local message=""
 		local padding
-		local max_length=50
-		local FUNCRET=""
 		
-		local indent=""
-		for ((j=0; j<$depth; j++)); do
-			indent+="    "
-		done
+		local -i PAD=$((DEPTH * 4))
 		
-		current_branch=$(git -C "$path" rev-parse --abbrev-ref HEAD)
+		current_branch=$(git -C "$dir/$path" rev-parse --abbrev-ref HEAD)
 		if $ISTRUNK ; then
-			repo_path=$(git -C "$path" rev-parse --show-toplevel)
-			repo_name=$(basename "$repo_path")
-			message="${repo_name} ($current_branch)"
-			local color="$RED"
-			echo -e -n "\e[${color}m${message}\e[0m"
+			repo_path=$(git -C "$dir/$path" rev-parse --show-toplevel)
+			repo_name=$(basename "$repo_path")	
+			monkey_say "${repo_name} ($current_branch)" -n --pad "$PAD" --color "$RED"
 		elif $ISLEAVES ; then
-			message="${indent}└── ${name} ($current_branch)"
-			local color="$GREEN"
-			echo -e -n "\e[${color}m${message}\e[0m"
+			monkey_say "${indent}└── ${name} ($current_branch)" -n --pad "$PAD" --color "$GREEN"
 		else 
-			message="${indent}└── ${name} ($current_branch)"
-			echo -n "$message"
+			monkey_say "${indent}└── ${name} ($current_branch)" -n --pad "$PAD"
 		fi
 				
 		if $YALL ; then
-			echo ""
 			answer=true
 		else
-			length="${#message}"
-			padding=$((max_length - length))
-			padding=$((padding > 0 ? padding : 0))
-			printf "%*s" "$padding" ""
-			answer="$(get_yes_no -d N "")"
+			answer="$(yes_no -d N --pad "$PAD")"
 		fi
 		
 		if $answer ; then
-			FUNCRET="$($FUNC "$dir" "$path" "$name")"
+			monkey_catch -n --pad "$((PAD+4))" "$FUNC" "$dir" "$path" "$name"
 		fi
 		
-		if [ -n "$FUNCRET" ] ; then
-			if $ISTRUNK ; then
-			echo -e "\e[${color}m${FUNCRET}\e[0m"
-			elif $ISLEAVES ; then
-				message="${indent}    $FUNCRET"
-				echo -e "\e[${color}m${message}\e[0m" 
-			else
-				echo "${indent}    $FUNCRET"
-			fi
-		fi
 	}
 	
 	prompt_parse SHOW_HELP MESSAGE FUNC YALL "${@}"
@@ -616,26 +967,184 @@ prompt() {
 		exit 1
 	fi
 	
-	echo "$MESSAGE"
-	gitmod climb prompt_tree --trunk --branches --leaves --up
+	if [ -z "$FUNC" ]; then
+		error -m "No function given to prompt. Nothing to do." 
+	fi
+	
+	printf "$MESSAGE " -n
+	git-monkey climb prompt_tree --trunk --branches --leaves --up
 	
 	unset -f prompt_tree -f prompt_parse
 }
 
+plant() {
+	local SHOW_HELP=false
+	local BRANCH=""
+	local NEWTREEPATH=".."
+	local LASTOUTPUT=""
+	
+	local non_flag_args=0
+	
+	plant_parse() {
+		local -n show_help_ref=$1
+		local -n branch_ref=$2
+		local -n newtreepath_ref=$3
+		
+		shift 3
+				
+		while [[ $# -gt 0 ]]; do
+			case "$1" in
+				--help)
+					show_help_ref=true
+					shift
+					;;
+				--path)
+					if [[ -n "$2" && "$2" != -* ]]; then
+						newtreepath_ref="$2"
+						shift 2
+					else
+						error -m "Error: No paths given after --path."
+					fi
+					;;
+				-*)
+					error -m "Unknown option: $1"
+					;;
+				*)
+					non_flag_args=$((non_flag_args + 1))
+					if [[ $non_flag_args -gt 1 ]]; then
+						error -m "Unknown option: $1"
+					fi
+					branch_ref="$1"
+					shift
+					;;
+			esac
+		done
+	}
+	
+	init_module(){
+		local dir="$1"
+		local path="$2"
+		local -i PAD="$3"
+		local color="$4"
+		#echo ""
+		monkey_say -n --pad "$((PAD+4))" --color "$CYAN" "git -C $dir submodule update --init $path"
+		monkey_catch -n --pad "$((PAD+4))" --color "$WHITE" git -C "$dir" submodule update --init "$path"
+		echo ""
+		if [ "$?" != 0 ]; then
+			error -m "Initialization failed."
+		fi		
+	}
+	
+	set_branch() {
+	# Display available branches
+	# Ask for which branch to switch to
+	# Try to checkout the branch
+	# Check if the checkout was successful
+	# If sucess then modifies the .gitmodules to reflect that choice
+		local dir="$1"
+		local path="$2"
+		local name="$3"
+		local padding="$4"
+		local color="$5"
+
+		monkey_say "Availables branches : " -n --pad "$padding" --color "${color}"
+		
+		mapfile -t branches_array < <(git -C "$dir/$path" branch --all)
+		for branch in "${branches_array[@]}"; do
+			monkey_say "${branch}" -n --pad "$padding" --color "$WHITE"
+		done
+
+		while true; do
+			monkey_say "Enter a branch name to checkout: " --pad "$padding" --color "${color}"
+			read branch_name
+		
+			git -C "$dir/$path" checkout "$branch_name" > /dev/null 2>&1
+
+			if [ $? -eq 0 ]; then
+				monkey_say "Switched to branch '$branch_name'." -n --pad "$padding" --color "${color}"
+				break
+			else
+				monkey_say "Branch '$branch_name' does not exist or checkout failed.\nPlease try again." -n --pad "$padding" --color "${color}"
+			fi
+		done
+		
+		set_module_key "$dir/.gitmodules" "$name" "branch" "$branch_name"
+		
+		monkey_say "(Updated) .gitmodules with $name.branch = $branch_name" -n --pad "$padding" --color "${color}"
+		echo ""
+	}
+	
+	plant_tree(){
+		local dir="$1"
+		local path="$2"
+		local name="$3"
+		local answer=''
+		local -i max_length=50
+		local -i PAD=$((DEPTH*4))
+
+		current_branch=$(git -C "$dir/$path" rev-parse --abbrev-ref HEAD)
+		if $ISTRUNK ; then
+			repo_path=$(git -C "$dir/$path" rev-parse --show-toplevel)
+			repo_name=$(basename "$repo_path")
+			monkey_say "${repo_name} ($current_branch)" -n --pad "$PAD" --color "$RED"
+		else
+			branch=$(get_module_key "$dir/.gitmodules" "$name" "branch")
+			if [ -n "$branch" ]; then
+				message="└── ${name} ($current_branch) [$branch]"
+			else 
+				message="└── ${name} ($current_branch) []"
+			fi
+			monkey_say "${message}" -n --pad "$PAD" --color "$CYAN"
+			
+			init_module "$dir" "$path" "$PAD" "$WHITE"	
+			set_branch "$dir" "$path" "$name" "$((PAD+4))" "$WHITE"
+		fi	
+	}
+	
+	plant_parse SHOW_HELP BRANCH NEWTREEPATH "${@}"
+	
+	if $SHOW_HELP; then
+		plant_help
+		exit 1
+	fi
+	
+	# SETUP THE NEW WORKTREE ####################################
+	# Get the current repo's name
+	repo_path=$(git -C "$dir" rev-parse --show-toplevel)
+	repo_name=$(basename "$repo_path")
+	
+	local worktree_path="$dir/$NEWTREEPATH/${repo_name}_$BRANCH"
+		
+	monkey_say "Planting branch '$BRANCH' at location '$worktree_path' " -n --color "$CYAN"
+	
+	LASTOUTPUT="$(git worktree add "$worktree_path" "$BRANCH" 2>&1)"
+	if [ "$?" != 0 ] ; then
+		error -m "$LASTOUTPUT" 
+	fi	
+	# set the directory to the new worktree
+	cd "$worktree_path" # The command line now displays the worktree as the current branch
+	
+	monkey_say --color "$CYAN" --pad "2" " Change directory to: $(pwd) \n To activate the $BRANCH branch." -n
+	echo ""
+	
+	dir="." 
+	#############################################################
+	
+	git-monkey climb plant_tree --init --trunk --branches --leaves --up
+	
+	unset -f plant_tree -f plant_parse -f set_branch -f init_module
+}
+
 tree() {
 	local SHOW_HELP=false
-	local RED='31'
-	local GREEN='32'
+	local DOWN=false
+	local SEP="└──"
 	
 	tree_parse() {
 		local -n show_help_ref=$1
+		local -n down_ref=$2
 
-		shift 1
-
-		#dir should normally have been declared globally but in case it asn't
-		if [ -z "$dir" ] ; then
-			dir="."
-		fi
+		shift 2
 		
 		while [[ $# -gt 0 ]]; do
 			case "$1" in
@@ -643,9 +1152,12 @@ tree() {
 					show_help_ref=true
 					shift
 					;;
+				--down)
+					down_ref=true
+					shift
+					;;
 				*)
-					echo "Unknown option: $1"
-					exit 1
+					error -m "Unknown option: $1"
 					;;
 			esac
 		done
@@ -657,55 +1169,58 @@ tree() {
 		local path="$2"
 		local name="$3"
 		
-		local indent=""
-		for ((j=0; j<$depth; j++)); do
-			indent+="    "
-		done
+		local branch=""
 		
-		current_branch=$(git -C "$path" rev-parse --abbrev-ref HEAD)
+		local -i PAD=$((DEPTH * 4))
+		
+		current_branch=$(git -C "$dir/$path" rev-parse --abbrev-ref HEAD)
 		if $ISTRUNK ; then
-			repo_path=$(git -C "$path" rev-parse --show-toplevel)
+			repo_path=$(git -C "$dir/$path" rev-parse --show-toplevel)
 			repo_name=$(basename "$repo_path")
-			echo_colored "${repo_name} ($current_branch)" "$RED"
+			echo ""
+			echo "Legend : "
+			echo "    (HEAD) as returned by git rev-parse --abbrev-ref HEAD"
+			echo "    [branch] as declared in .gitmodules"
+			echo ""
+			monkey_say "${repo_name} ($current_branch)" -n --pad "$PAD" --color "$RED"
 		elif $ISLEAVES ; then
-			echo_colored "${indent}└── ${name} ($current_branch)" "$GREEN"
+			branch=$(get_module_key "$dir/.gitmodules" "$name" "branch")
+			if [ -n "$branch" ]; then
+			monkey_say "$SEP ${name} ($current_branch) [$branch]" -n --pad "$PAD" --color "$GREEN"
+			else 
+			monkey_say "$SEP ${name} ($current_branch) []" -n --pad "$PAD" --color "$GREEN"
+			fi
 		else 
-			echo "${indent}└── ${name} ($current_branch)"
+			monkey_say "$SEP ${name} ($current_branch)" -n --pad "$PAD"
 		fi
 		
 	}
 	
-	tree_parse SHOW_HELP "${@}"
+	tree_parse SHOW_HELP DOWN "${@}"
 	if $SHOW_HELP; then
 		tree_help
 		exit 1
 	fi
 	
-	echo "Legend :"
-	echo_colored "	trunk" "$RED"
-	echo "	branch"
-	echo_colored "	leaves" "$GREEN"
-	echo ""
-	echo "Tree :"
-	
-	gitmod climb draw_tree --trunk --branches --leaves --up
+		
+	if ! $DOWN; then
+		git-monkey climb draw_tree --trunk --branches --leaves --up
+	else
+		SEP="┌──"
+		git-monkey climb draw_tree --trunk --branches --leaves --down
+	fi
 	
 	unset -f draw_tree -f tree_help -f tree_parse
 }
 
+
 checkout() {
 	local SHOW_HELP=false
-	local GREEN='32'
 	
 	checkout_parse() {
 		local -n show_help_ref=$1
 		shift 1
 
-		#dir should normally have been declared globally but in case it asn't
-		if [ -z "$dir" ] ; then
-			dir="."
-		fi
-		
 		while [[ $# -gt 0 ]]; do
 			case "$1" in
 				--help)
@@ -713,8 +1228,7 @@ checkout() {
 					shift
 					;;
 				*)
-					echo "Unknown option: $1"
-					exit 1
+					error -m "Unknown option: $1"
 					;;
 			esac
 		done
@@ -732,8 +1246,8 @@ checkout() {
 		local name="$3"
 		local branch=$(get_module_key "$dir/.gitmodules" "$name" "branch")
 		if [ -n "$branch" ]; then
-			echo_colored "$path checkout $branch" "32" #green
-			git -C "$path" checkout "$branch" 
+			monkey_say "$path checkout $branch" -n --color "32" #green
+			git -C "$dir/$path" checkout "$branch" 
 		fi
 	}
 	climb checkout_module --branches --leaves --up
@@ -751,11 +1265,6 @@ pull() {
 		local -n force_rebase_ref=$2
 		local -n force_merge_ref=$3
 		shift 3
-
-		#dir should normally have been declared globally but in case it asn't
-		if [ -z "$dir" ] ; then
-			dir="."
-		fi
 		
 		while [[ $# -gt 0 ]]; do
 			case "$1" in
@@ -772,8 +1281,7 @@ pull() {
 					shift
 					;;
 				*)
-					echo "Unknown option: $1"
-					exit 1
+					error -m "Unknown option: $1"
 					;;
 			esac
 		done
@@ -786,12 +1294,12 @@ pull() {
 		local update
 		local pull_type
 		
-		echo_colored "$path pull " "32" #green
+		monkey_say "$path pull " -n --color "32" #green
 		branch=$(get_module_key "$dir/.gitmodules" "$name" "branch")
 		update=$(get_module_key "$dir/.gitmodules" "$name" "update")
 		
 		if [ -n "$branch" ]; then 
-			git -C "$path" checkout "$branch" --quiet
+			git -C "$dir/$path" checkout "$branch" --quiet
 		fi
 		
 		if $FORCE_REBASE ; then
@@ -803,9 +1311,9 @@ pull() {
 		fi
 		
 		# only pull module for which branch is defined
-		# This sorta inforce the use of .gitmodule branch and update.
+		# This sorta inforce the use of .gitmodules branch and update.
 		if [ -n "$branch" ]; then 
-			git -C "$path" pull "$pull_type"
+			git -C "$dir/$path" pull "$pull_type"
 		fi
 	}
 	
@@ -820,6 +1328,73 @@ pull() {
 	unset -f pull_module -f pull_parse
 }
 
+push() {
+	local SHOW_HELP=false
+	local FORCE=false
+	
+	push_parse() {
+		local -n show_help_ref=$1
+		local -n force_ref=$2
+		shift 2
+		
+
+		
+		while [[ $# -gt 0 ]]; do
+			case "$1" in
+				--help)
+					show_help_ref=true
+					shift
+					;;
+				--force)
+					force_ref=true
+					shift
+					;;
+				*)
+					error -m "Unknown option: $1"
+					;;
+			esac
+		done
+	}
+	push_module(){
+		local dir="$1"
+		local path="$2"
+		local name="$3"
+		local LASTOUTPUT=""
+		
+		monkey_say "$path push " -n --color "32" #green
+		
+		# will return "no_push" when repo as been set to mute
+		pushurl="$(git -C "$dir/$path" remote get-url origin --push)"
+		
+		if [ -z "$pushurl" ] || [ "$pushurl" == "no_push" ] ; then
+			echo "skip"
+			return 0 
+		fi
+		
+		if [ "$FORCE" != true ] ; then
+			LASTOUTPUT="$(git -C "$dir/$path" push) 2>&1"
+		elif [ "$FORCE" == true ] ; then
+			LASTOUTPUT="$(git -C "$dir/$path" push --force) 2>&1"
+		fi
+		
+		if [ "$?" != 0 ] ; then
+			error -m "$LASTOUTPUT"
+		else 
+			monkey_say --color "$CYAN" "$LASTOUTPUT " -n
+		fi	
+	}
+	
+	push_parse SHOW_HELP FORCE "${@}"
+	if $SHOW_HELP; then
+		pull_help
+		exit 1
+	fi
+	
+	climb push_module --trunk --branches --leaves --up
+	
+	unset -f push_module -f push_parse
+}
+
 add() {
 	local SHOW_HELP=false
 	local MODULE=false
@@ -832,10 +1407,8 @@ add() {
 		local -n all_ref=$3
 		local -n nomodule_ref=$4
 		shift 4
-		#dir should normally have been declared globally but in case it asn't
-		if [ -z "$dir" ] ; then
-			dir="."
-		fi
+		
+
 		
 		while [[ $# -gt 0 ]]; do
 			case "$1" in
@@ -856,8 +1429,7 @@ add() {
 					shift
 					;;
 				*)
-					echo "Unknown option: $1"
-					exit 1
+					error -m "Unknown option: $1"
 					;;
 			esac
 		done
@@ -867,17 +1439,17 @@ add() {
 		local path="$2"
 		local name="$3"
 		
-		echo_colored "$dir add" "32" #green
+		monkey_say "$dir add " -n --color "32" #green
 		
 		if $MODULE ; then
 			git -C "$dir" add name
 		elif $NOMODULE ; then
-			git -C "$path" add --all 
+			git -C "$dir/$path" add --all 
 			if ! $ISTRUNK ; then
 				git -C "$dir" reset name 
 			fi
 		else #ALL
-			git -C "$path" add --all
+			git -C "$dir/$path" add --all
 		fi
 	}
 	
@@ -905,10 +1477,8 @@ reset_modules() {
 	reset_parse() {
 		local -n show_help_ref=$1
 		shift 1
-		#dir should normally have been declared globally but in case it asn't
-		if [ -z "$dir" ] ; then
-			dir="."
-		fi
+		
+
 		
 		while [[ $# -gt 0 ]]; do
 			case "$1" in
@@ -927,8 +1497,8 @@ reset_modules() {
 		local dir="$1"
 		local path="$2"
 		local name="$3"
-		echo_colored "$path reset" "32" #green
-		git -C "$path" reset
+		monkey_say "$path reset " -n --color "32" #green
+		git -C "$dir/$path" reset
 	}
 	
 	reset_parse SHOW_HELP "${@}"
@@ -954,9 +1524,7 @@ commit() {
 		shift 3
 
 		# dir should normally have been declared globally but in case it hasn't
-		if [ -z "$dir" ] ; then
-			dir="."
-		fi
+
 
 		while [[ $# -gt 0 ]]; do
 			case "$1" in
@@ -969,8 +1537,7 @@ commit() {
 						message_ref="$2"
 						shift 2
 					else
-						echo "Error: -m requires a commit message."
-						exit 1
+						error -m "-m requires a commit message."
 					fi
 					;;
 				--trunk)
@@ -1004,8 +1571,7 @@ commit() {
 					shift
 				;;
 				*)
-					echo "Unknown option: $1"
-					exit 1
+					error -m "Unknown option: $1"
 					;;
 			esac
 		done
@@ -1015,11 +1581,12 @@ commit() {
 
 	commit_module(){
 		local dir="$1"
+		local dir="$1"
 		local path="$2"
 		local name="$3"
 
-		echo_colored "$path commit" "32" #green
-		git -C "$path" commit -m "$MESSAGE"
+		monkey_say "$path commit " -n --color "32" #green
+		git -C "$dir/$path" commit -m "$MESSAGE"
 	}
 
 	commit_parse SHOW_HELP MESSAGE OPTIONS "${@}"
@@ -1029,8 +1596,7 @@ commit() {
 	fi
 
 	if [ -z "$MESSAGE" ]; then
-		echo "Error: Commit message is required. Use -m <message> to provide a commit message."
-		exit 1
+		error -m "Commit message is required. Use -m <message> to provide a commit message."
 	fi
 
 	climb commit_module "$OPTIONS" --up
@@ -1053,11 +1619,7 @@ grow() {
 		local -n all_ref=$4
 		local -n nomodule_ref=$5
 		shift 5
-		#dir should normally have been declared globally but in case it asn't
-		if [ -z "$dir" ] ; then
-			dir="."
-		fi
-		
+				
 		while [[ $# -gt 0 ]]; do
 			case "$1" in
 				--help)
@@ -1069,8 +1631,7 @@ grow() {
 						message_ref="$2"
 						shift 2
 					else
-						echo "Error: -m requires a commit message."
-						exit 1
+						error -m "-m requires a commit message."
 					fi
 					;;
 				--module)
@@ -1086,8 +1647,7 @@ grow() {
 					shift
 					;;
 				*)
-					echo "Unknown option: $1"
-					exit 1
+					error -m "Unknown option: $1"
 					;;
 			esac
 		done
@@ -1105,18 +1665,18 @@ grow() {
 		local path="$2"
 		local name="$3"
 		
-		echo_colored "$dir grow" "32" #green
+		monkey_say "$dir grow " -n --color "32" #green
 		if $MODULE ; then
-			git -C "$path" commit -m "$MESSAGE"
+			git -C "$dir/$path" commit -m "$MESSAGE"
 			git -C "$dir" add name
 		elif $NOMODULE ; then
-			git -C "$path" commit -m "$MESSAGE"
+			git -C "$dir/$path" commit -m "$MESSAGE"
 			if ! $ISTRUNK ; then
 				git -C "$dir" reset name
 			fi
 		else #ALL
-			git -C "$path" add --all
-			git -C "$path" commit -m "$MESSAGE"
+			git -C "$dir/$path" add --all
+			git -C "$dir/$path" commit -m "$MESSAGE"
 		fi
 	}
 	
@@ -1127,8 +1687,7 @@ grow() {
 	fi
 	
 	if [ -z "$MESSAGE" ]; then
-		echo "Error: Commit message is required. Use -m <message> to provide a commit message."
-		exit 1
+		error -m "Commit message is required. Use -m <message> to provide a commit message."
 	fi
 	
 	if $MODULE ; then
@@ -1146,8 +1705,6 @@ grow() {
 
 mute() {
 	local SHOW_HELP=false
-	local RED='31'
-	local GREEN='32'
 	local UNDO=false
 	local COMMAN=""
 	local MESSAGE=""
@@ -1162,9 +1719,7 @@ mute() {
 
 		shift 4
 
-		if [ -z "$dir" ] ; then
-			dir="."
-		fi
+
 		
 		while [[ $# -gt 0 ]]; do
 			case "$1" in
@@ -1189,26 +1744,25 @@ mute() {
 					shift
 					;;
 				*)
-					echo "Unknown option: $1"
-					exit 1
+					error -m "Unknown option: $1"
 					;;
 			esac
 		done
 	}
 	
 	mute_cmd() {
-		git -C "$path" remote set-url --push origin no_push
+		git -C "$dir/$path" remote set-url --push origin no_push
 	}
 	
 	undo_cmd() {
-		pullurl="$(git -C "$path" remote get-url origin)"
-		git -C "$path" remote set-url --push origin "$pullurl"
+		pullurl="$(git -C "$dir/$path" remote get-url origin)"
+		git -C "$dir/$path" remote set-url --push origin "$pullurl"
 	}
 	
 	show_cmd() {
-		#pullurl="$(git -C "$path" remote get-url origin)"
+		#pullurl="$(git -C "$dir/$path" remote get-url origin)"
 		#echo "pull : $pullurl"
-		pushurl="$(git -C "$path" remote get-url origin --push)"
+		pushurl="$(git -C "$dir/$path" remote get-url origin --push)"
 		echo "$pushurl"
 	}
 	
@@ -1230,15 +1784,98 @@ mute() {
 	fi 
 	
 	if ! $SHOW; then
-		gitmod prompt $COMMAND -m "$MESSAGE" "${CMDARGS[@]}"
+		git-monkey prompt $COMMAND -m "$MESSAGE" "${CMDARGS[@]}"
 	else
-		gitmod prompt $COMMAND -m "$MESSAGE" --yes "${CMDARGS[@]}"
+		git-monkey prompt $COMMAND -m "$MESSAGE" --yes "${CMDARGS[@]}"
 	fi
 	
-	unset -f mute_tree -f mute_parse  -f mute_cmd -f undo_cmd -f show_cmd
+	unset -f mute_parse  -f mute_cmd -f undo_cmd -f show_cmd
 }
 
-gitmod "${@}"
+status() {
+	local SHOW_HELP=false
+	
+	parse() {
+		local -n show_help_ref=$1
+		shift 1
+
+		while [[ $# -gt 0 ]]; do
+			case "$1" in
+				--help)
+					show_help_ref=true
+					shift
+					;;
+				*)
+					error -m "Unknown option: $1"
+					;;
+			esac
+		done
+	}
+	
+	command() {
+		head_status="$(git -C "$1/$2" rev-parse --abbrev-ref HEAD 2>/dev/null)"
+		if [[ "$head_status" == "HEAD" ]]; then
+			printf "Detached HEAD"
+			return 0
+		fi
+		
+		status="$(git -C "$1/$2" status --short)"
+		if [ -z "$status" ] ; then
+			status="Up to date"
+		fi
+		printf "$status"
+	}
+	
+	parse SHOW_HELP "${@}"
+	if $SHOW_HELP; then
+		status_help
+		exit 1
+	fi
+	
+	git-monkey prompt command --yes
+	
+	unset -f parse -f command
+}
+
+branch() {
+	local SHOW_HELP=false
+	
+	parse() {
+		local -n show_help_ref=$1
+
+		shift 1
+
+
+		
+		while [[ $# -gt 0 ]]; do
+			case "$1" in
+				--help)
+					show_help_ref=true
+					shift
+					;;
+				*)
+					error -m "Unknown option: $1"
+					;;
+			esac
+		done
+	}
+	
+	command() {
+		git -C "$1/$2" branch --all
+	}
+	
+	parse SHOW_HELP "${@}"
+	if $SHOW_HELP; then
+		status_help
+		exit 1
+	fi
+	
+	git-monkey prompt command --yes
+	
+	unset -f parse -f command
+}
+
+git-monkey "${@}"
 
 )
 
