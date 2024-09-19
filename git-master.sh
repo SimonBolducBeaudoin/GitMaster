@@ -960,7 +960,7 @@ climb() {
 		current_branch=$(git -C "$dir/$path" rev-parse --abbrev-ref HEAD)
 		# On the way up
 		if (( DEPTH > 0 )) && $UPWARD && [[ $INITIALIZATION == true || -f "$dir/$path/.gitmodules" ]] && $TREE ; then
-			monkey_say "$SEP ${name} $(get_module_header $MODULE_HEADER)" -n --pad "$PAD" --color "$YELLOW" --silent "$SILENT"
+			monkey_say "$SEP ${module} $(get_module_header $MODULE_HEADER)" -n --pad "$PAD" --color "$YELLOW" --silent "$SILENT"
 		fi
 		
 		if (( DEPTH > 0 )) && $UPWARD && [[ $INITIALIZATION == true || -f "$dir/$path/.gitmodules" ]] && $BRANCHES ; then
@@ -981,7 +981,7 @@ climb() {
 			done
 		elif $LEAVES && (( DEPTH < MAXDEPTH )) && [ $INITIALIZATION == false ]; then
 			if $TREE ; then
-				monkey_say "$SEP ${name} $(get_module_header $MODULE_HEADER)" -n --pad "$PAD" --color "$GREEN" --silent "$SILENT"
+				monkey_say "$SEP ${module} $(get_module_header $MODULE_HEADER)" -n --pad "$PAD" --color "$GREEN" --silent "$SILENT"
 			fi
 			ISLEAVES=true
 			monkey_catch -n --pad "$PAD" --color "$GREEN" --silent "$SILENT" --prompt "$PROMPT" "$func" "$dir" "$path" "$module"
@@ -990,7 +990,7 @@ climb() {
 		
 		# On the way down
 		if (( DEPTH > 0 ))	&& ! $UPWARD && [ -f "$dir/$path/.gitmodules" ] && $TREE ; then
-			monkey_say "$SEP ${name} $(get_module_header $MODULE_HEADER)" -n --pad "$PAD" --color "$YELLOW" --silent "$SILENT" --prompt "$PROMPT" 
+			monkey_say "$SEP ${module} $(get_module_header $MODULE_HEADER)" -n --pad "$PAD" --color "$YELLOW" --silent "$SILENT"
 		fi
 		
 		if (( DEPTH > 0 ))	&& ! $UPWARD && [ -f "$dir/$path/.gitmodules" ] && $BRANCHES ; then
