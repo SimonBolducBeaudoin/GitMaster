@@ -302,6 +302,7 @@ monkey_catch() {
 	local STATUS=""
 	local SILENT=false
 	local PROMPT=false
+    local OK=()
 
     monkey_catch_parse() {
         local -n show_help_ref=$1
@@ -313,68 +314,95 @@ monkey_catch() {
         local -n showcmd_ref=$7
         local -n silent_ref=$8
 		local -n prompt_ref=$9
+		local -n ok_ref=${10}
 
-        shift 9
+        shift 10
 
         while (( "$#" )); do
-            case "$1" in
-                -h|--help)
-                    show_help_ref=true
-                    shift
-                    ;;
-                -p|--pad)
-                    if [[ -n "$2" && "$2" != -* ]]; then
-                        pad_ref="$2"
+            # no command has been found yet
+            if [[ -z "$cmds_ref" ]] ; then 
+                case "$1" in
+                    -h|--help)
+                        show_help_ref=true
+                        shift
+                        ;;
+                    -p|--pad)
+                        if [[ -n "$2" && "$2" != -* ]]; then
+                            pad_ref="$2"
+                            shift 2
+                        else
+                            error -m "-p|--pad requires padding value."
+                        fi
+                        ;;
+                    -c|--color)
+                        if [[ -n "$2" && "$2" != -* ]]; then
+                            clr_ref="$2"
+                            shift 2
+                        else
+                            error -m "-c|--color requires an ANSI color number."
+                        fi
+                        ;;
+                    --maxpad)
+                        if [[ -n "$2" && "$2" != -* ]]; then
+                            max_pad_ref="$2"
+                            shift 2
+                        else
+                            error -m "--maxpad requires a maximum padding value."
+                        fi
+                        ;;
+                    -n|--extra-line)
+                        extra_line_ref=true
+                        shift
+                        ;;
+                    --cmd|--show_command)
+                        if [[ -n "$2" && "$2" != -* ]]; then
+                            showcmd_ref="$2"
+                            shift 2
+                        else
+                            error -m "--prompt true or false ?"
+                        fi
+                        ;;
+                    --prompt)
+                        if [[ -n "$2" && "$2" != -* ]]; then
+                            prompt_ref="$2"
+                            shift 2
+                        else
+                            error -m "--prompt true or false ?"
+                        fi
+                        ;;
+                    --silent)
+                        if [[ -n "$2" && "$2" != -* ]]; then
+                            silent_ref="$2"
+                            shift 2
+                        else
+                            error -m "--silent true or false ?"
+                        fi
+                        ;;
+                    --ok)
+                        shift
+                        while (( "$#" )); do
+                            # ends with --ko
+                            if [[ -n "$1" && "$1" != -* ]]; then
+                                ok_ref+=("$1")
+                                shift
+                            else
+                                break
+                            fi
+                        done
+                        ;;
+                    -f|--func)
+                        cmds_ref+=("$2")
                         shift 2
-                    else
-                        error -m "-p|--pad requires padding value."
-                    fi
-                    ;;
-                -c|--color)
-                    if [[ -n "$2" && "$2" != -* ]]; then
-                        clr_ref="$2"
-                        shift 2
-                    else
-                        error -m "-c|--color requires an ANSI color number."
-                    fi
-                    ;;
-                --maxpad)
-                    if [[ -n "$2" && "$2" != -* ]]; then
-                        max_pad_ref="$2"
-                        shift 2
-                    else
-                        error -m "--maxpad requires a maximum padding value."
-                    fi
-                    ;;
-                -n|--extra-line)
-                    extra_line_ref=true
-                    shift
-                    ;;
-				--cmd|--show_command)
-                    showcmd_ref=true
-                    shift
-                    ;;
-				--prompt)
-					if [[ -n "$2" && "$2" != -* ]]; then
-                        prompt_ref="$2"
-                        shift 2
-                    else
-                        error -m "--prompt true or false ?"
-                    fi
-                    ;;
-				--silent)
-					if [[ -n "$2" && "$2" != -* ]]; then
-                        silent_ref="$2"
-                        shift 2
-                    else
-                        error -m "--silent true or false ?"
-                    fi
-                    ;;
-                *)
-                    cmds_ref+=("$1")
-                    shift 
-                    ;;
-            esac
+                        ;;
+                    -*|--*)
+                        error -m "monkey_catch received invalid flag/command : $1"
+                        ;;
+                esac
+            else
+                # All remaining arguments after -f func are treated as func's arguments
+                cmds_ref+=("$@") 
+                break
+            fi
         done
     }
 
@@ -387,15 +415,20 @@ monkey_catch() {
 		fi
 
 		if $SHOW_COMMAND ; then
-			CMDOUT="$(printf '%s' "${COMMANDS[@]}")"
+			CMDOUT="$(printf '%s ' "${COMMANDS[@]}")"
 			CMDOUT=$(printf "%s" "$CMDOUT" | awk -v pad="$PADDING" '{ printf "%*s%s\n", pad, "", $0 }')
 			printf "\e[${COLOR}m%s\e[0m\n" "$CMDOUT"
 		fi
 		OUTPUT="$("${COMMANDS[@]}" 2>&1)"
 		STATUS=$?
 		OUTPUT=$(printf "%s" "$OUTPUT" | awk -v pad="$PADDING" '{ printf "%*s%s\n", pad, "", $0 }')
+        
+        local SKIP=false
+        if [[ "$STATUS " =~ "${OK[@]}" ]] ; then 
+            SKIP=true
+        fi
 
-		if [ $STATUS -ne 0 ] ; then
+		if [[ $STATUS -ne 0 && "$SKIP" == false ]]; then
 			error -m "$OUTPUT"
 		elif $EXTRA_LINE && [[ -n "$OUTPUT" ]] && ! $SILENT; then
 			printf "\e[${COLOR}m%s\e[0m\n" "$OUTPUT"
@@ -404,7 +437,7 @@ monkey_catch() {
 		fi
 	}
 
-    monkey_catch_parse SHOW_HELP PADDING COLOR MAX_PADDING COMMANDS EXTRA_LINE SHOW_COMMAND SILENT PROMPT "$@"
+    monkey_catch_parse SHOW_HELP PADDING COLOR MAX_PADDING COMMANDS EXTRA_LINE SHOW_COMMAND SILENT PROMPT OK "$@"
 
     if $SHOW_HELP ; then
         monkey_catch_help
@@ -426,7 +459,8 @@ monkey_catch() {
 	
 
 monkey_say() {
-    monkey_catch printf "$@"
+    args=("$@")          
+    monkey_catch "${args[@]:1}" --func printf "$1"
 }
 
 error() {
@@ -646,73 +680,77 @@ git-monkey() {
 	local CMDARGS=()
 	local PRIVATEMODE=false
 	local DEPRECATEDMODE=false
+    local SHOW_HELP=false
 		
-	git-monkey_parse() {
-		local -n dir_ref=$1
-		local -n command_ref=$2
-		local -n cmd_args_ref=$3
-		local -n privatemode_ref=$4
-		local -n deprecatedmode_ref=$5
-		
-		shift 5
+    git-monkey_parse() {
+        local -n showhelp_ref=$1
+        local -n dir_ref=$2
+        local -n privatemode_ref=$3
+        local -n deprecatedmode_ref=$4
+        local -n command_ref=$5
+        local -n cmd_args_ref=$6
 
-		local public_commands=("spawn" "climb" "tree" "plant" "grow" "status" "checkout" "pull" "push" "add" "reset" "commit" "mute" "DOS2UNIX" "IGNORE" "RESTORE")
-		local private_commands=("error" "monkey_catch" "monkey_say" "error" "yes_no" "get_module_names" "get_module_key" "set_module_key")
-		local deprecated_commands=("branch")
+        shift 6
 
-		while (( "$#" )); do
-			case "$1" in
-				-C)
-					dir_ref="$2"
-					shift 2
-					;;
-				--help|-h)
-					cmd_args_ref+=("--help")
-					shift
-					;;
-				--private)
-					privatemode_ref=true
-					shift
-					;;
-				--deprecated)
-					deprecatedmode_ref=true
-					shift
-					;;	
-				--*)
-					cmd_args_ref+=("$1")
-					shift
-					;;
-				-*)
-					cmd_args_ref+=("$1")
-					shift
-					;;	
-				*)
-					if [[ -z "$command_ref" ]]; then
-						if [[ " ${public_commands[@]} " =~ " $1 " ]]; then
-							command_ref="$1"
-						elif [[ " ${private_commands[@]} " =~ " $1 " && "$privatemode_ref" == true ]]; then
-							command_ref="$1"
-						elif [[ " ${deprecated_commands[@]} " =~ " $1 " && "$deprecatedmode_ref" == true ]]; then
-							command_ref="$1"
-						else
-							echo "Invalid command: $1"
-							showhelp_ref=true
-						fi
-						if [[ "$command_ref" == "reset" ]] ; then
-							command_ref="reset_modules" # A consequence of the fact that I'm avoiding collision with the reset function.
-						fi
-					else
-						cmd_args_ref+=("$1")
-					fi
-					shift
-					;;
-			esac
-		done
-	}
+        local public_commands=("spawn" "climb" "tree" "plant" "grow" "status" "checkout" "pull" "push" "add" "reset" "commit" "mute" "DOS2UNIX" "IGNORE" "RESTORE")
+        local private_commands=("error" "monkey_catch" "monkey_say" "error" "yes_no" "get_module_names" "get_module_key" "set_module_key" "dummy")
+        local deprecated_commands=("branch")
 
-	git-monkey_parse dir command CMDARGS PRIVATEMODE DEPRECATEDMODE "$@"
+        while (( "$#" )); do
+            # no command has been found yet
+            if [[ -z "$command_ref" ]] ; then 
+                case "$1" in
+                    -C)                    
+                        if [[ -n "$2" && "$2" != -* ]]; then
+                        dir_ref="$2"
+                        shift 2
+                        else
+                            error -m "git-monkey -C needs a directory"
+                        fi    
+                        ;;
+                    --help|-h)
+                        showhelp_ref=true
+                        shift
+                        ;;
+                    --private)
+                        privatemode_ref=true
+                        shift
+                        ;;
+                    --deprecated)
+                        deprecatedmode_ref=true
+                        shift
+                        ;;	
+                    --*|-*)
+                        error -m "git-monkey received invalid flag/command : $1"
+                        ;;	
+                    *)						
+                        if [[ " ${public_commands[@]} " =~ " $1 " ]]; then
+                            command_ref="$1"
+                        elif [[ " ${private_commands[@]} " =~ " $1 " && "$privatemode_ref" == true ]]; then
+                            command_ref="$1"
+                        elif [[ " ${deprecated_commands[@]} " =~ " $1 " && "$deprecatedmode_ref" == true ]]; then
+                            command_ref="$1"
+                        else
+                            error -m "git-monkey received invalid flag/command : $1"
+                        fi
+                        if [[ "$command_ref" == "reset" ]] ; then
+                            # I'm avoiding collision with the reset function.
+                            command_ref="reset_modules" 
+                        fi
+                        shift
+                        ;;
+                esac
+            else
+                # All remaining arguments are treated as command arguments
+                cmd_args_ref+=("$@") 
+                break
+            fi
+        done
+    }
 
-	if [[ -z "$command" ]] ; then
+	git-monkey_parse SHOW_HELP dir PRIVATEMODE DEPRECATEDMODE command CMDARGS "$@"
+
+	if [[ -z "$command" ]] || $SHOW_HELP ; then
 	   git-monkey_help
 	   exit 1
 	fi
@@ -731,43 +769,9 @@ git-monkey() {
 	unset -f git-monkey_parse
 }
 
-spawn() {
-	local SHOW_HELP=false
-	
-	parse() {
-		local -n show_help_ref=$1
-
-		shift 1
-		
-		while [[ $# -gt 0 ]]; do
-			case "$1" in
-				--help)
-					show_help_ref=true
-					shift
-					;;
-				*)
-					error -m "Unknown option: $1"
-					;;
-			esac
-		done
-	}
-	
-	parse SHOW_HELP "${@}"
-	if $SHOW_HELP; then
-		status_help
-		exit 1
-	fi
-	
-	git -C "$dir" submodule update --init --recursive
-	git-monkey checkout
-	git-monkey tree
-	
-	unset -f parse
-}
-
-
 climb() {
 	local func=""
+    local FUNCARGS=()
 	local LEAVES=false
 	local BRANCHES=false
 	local TRUNK=false
@@ -780,114 +784,149 @@ climb() {
 	local TREE=false
 	local FLAT=false
 	local PROMPT=false
+	local SHOW_COMMAND=false
 	local MESSAGE=""
 	local -i MODULE_HEADER=0
 	local path="."
+    local NOT=() # Modules not to be executed on
+    local OK=() # Errors that are ok to be skipped
 	
 	climb_parse() {
-		local -n leaves_ref=$1
-		local -n branches_ref=$2
-		local -n trunk_ref=$3
-		local -n upward_ref=$4
-		local -n show_help_ref=$5
-		local -n func_ref=$6
-		local -n init_ref=$7
-		local -n begin_ref=$8
-		local -n end_ref=$9
-		local -n silent_ref=${10}
-		local -n tree_ref=${11}
-		local -n flat_ref=${12}
-		local -n header_type_ref=${13}
-		local -n prompt_ref=${14}
-		local -n msg_ref=${15}
+		local -n show_help_ref=$1
+        local -n leaves_ref=$2
+		local -n branches_ref=$3
+		local -n trunk_ref=$4
+		local -n upward_ref=$5
+		local -n init_ref=$6
+		local -n begin_ref=$7
+		local -n end_ref=$8
+		local -n silent_ref=$9
+		local -n tree_ref=${10}
+		local -n flat_ref=${11}
+		local -n header_type_ref=${12}
+		local -n prompt_ref=${13}
+		local -n msg_ref=${14}
+		local -n showcmd_ref=${15}
+        local -n not_ref=${16}
+        local -n func_ref=${17}
+        local -n cmd_args_ref=${18}
+        local -n ok_ref=${19}
 		
-		local non_flag_args=0
-
-		shift 15
+		shift 19
 		
 		while [[ $# -gt 0 ]]; do
-			case "$1" in
-				--leaves)
-					leaves_ref=true
-					shift
-					;;
-				--branches)
-					branches_ref=true
-					shift
-					;;
-				--trunk)
-					trunk_ref=true
-					shift
-					;;
-				--begin)
-					begin_ref=true
-					shift
-					;;
-				--end)
-					end_ref=true
-					shift
-					;;	
-				--up)
-					upward_ref=true
-					shift
-					;;
-				--down)
-					upward_ref=false
-					shift
-					;;
-				--init|--initialization)
-					upward_ref=true
-					init_ref=true
-					shift
-					;;
-				--silent)
-					silent_ref=true
-					shift
-					;;
-				--tree)
-					tree_ref=true
-					shift
-					;;
-				--flat)
-					flat_ref=true
-					shift
-					;;
-				--prompt)
-					prompt_ref=true
-					shift
-					;;
-				--help)
-					show_help_ref=true
-					shift
-					;;
-				--header)
-					if [[ -n "$2" && "$2" =~ ^[0-2]$ ]]; then
-						header_type_ref="$2"
-						shift 2
-					else
-						error -m "Header type as to be 0 1 or 2."
-					fi
-					;;
-				-m|--message)
-                    if [[ -n "$2" && "$2" != -* ]]; then
-                        msg_ref="$2"
+            # no command has been found yet
+            if [[ -z "$func_ref" ]] ; then 
+                case "$1" in
+                    --leaves)
+                        leaves_ref=true
+                        shift
+                        ;;
+                    --branches)
+                        branches_ref=true
+                        shift
+                        ;;
+                    --trunk)
+                        trunk_ref=true
+                        shift
+                        ;;
+                    --begin)
+                        begin_ref=true
+                        shift
+                        ;;
+                    --end)
+                        end_ref=true
+                        shift
+                        ;;	
+                    --up)
+                        upward_ref=true
+                        shift
+                        ;;
+                    --down)
+                        upward_ref=false
+                        shift
+                        ;;
+                    --init|--initialization)
+                        upward_ref=true
+                        init_ref=true
+                        shift
+                        ;;
+                    --silent)
+                        silent_ref=true
+                        shift
+                        ;;
+                    --tree)
+                        tree_ref=true
+                        shift
+                        ;;
+                    --flat)
+                        flat_ref=true
+                        shift
+                        ;;
+                    --prompt)
+                        prompt_ref=true
+                        shift
+                        ;;
+                    --cmd|--show_command)
+                        showcmd_ref=true
+                        shift
+                        ;;
+                    --help)
+                        show_help_ref=true
+                        shift
+                        ;;
+                    --header)
+                        if [[ -n "$2" && "$2" =~ ^[0-2]$ ]]; then
+                            header_type_ref="$2"
+                            shift 2
+                        else
+                            error -m "Header type as to be 0 1 or 2."
+                        fi
+                        ;;
+                    -m|--message)
+                        if [[ -n "$2" && "$2" != -* ]]; then
+                            msg_ref="$2"
+                            shift 2
+                        else
+                            error -m "-m|--message requires a message."
+                        fi
+                        ;;
+                    --not)
+                        shift
+                        while (( "$#" )); do
+                            if [[ -n "$1" && "$1" != -* ]]; then
+                                not_ref+=("$1")
+                                shift
+                            else
+                                break
+                            fi
+                        done
+                        ;;
+                    --ok)
+                        shift
+                        while (( "$#" )); do
+                            # ends with --ko
+                            if [[ -n "$1" && "$1" != -* ]]; then
+                                ok_ref+=("$1")
+                                shift
+                            else
+                                break
+                            fi
+                        done
+                        ;;
+                    -f|--func)
+                        func_ref="$2"
                         shift 2
-                    else
-                        error -m "-m|--message requires a message."
-                    fi
-                    ;;
-				-*)
-					error -m "Unknown option: $1"
-					;;
-				*)
-					non_flag_args=$((non_flag_args + 1))
-					if [[ $non_flag_args -gt 1 ]]; then
-						error -m "Unknown option: $1"
-					fi
-					func_ref="$1"
-					shift
-					;;
-			esac
+                        ;;
+                    -*|--*)
+                        error -m "climb received invalid flag/command : $1"
+                        ;;
+                esac
+            else
+                # All remaining arguments after -f func are treated as func's arguments
+                cmd_args_ref+=("$@") 
+                break
+            fi
 		done
 	}
 	
@@ -932,7 +971,7 @@ climb() {
 				shift
 				;;
 			*)
-				error -m "Unknown option: $1"
+				error -m "Climb --tree unknow header option : $1"
 				;;
 		esac
 		printf "$header_ref"
@@ -943,6 +982,9 @@ climb() {
 		local dir="$2"
 		local path="$3"
 		local module="$4"
+        shift 4 
+        local funcargs=("$@")
+        
 		local branching_up=false	
 		
 		# SILENT, FLAT , MODULE_HEADER and TREE are global to this function
@@ -965,7 +1007,11 @@ climb() {
 		
 		if (( DEPTH > 0 )) && $UPWARD && [[ $INITIALIZATION == true || -f "$dir/$path/.gitmodules" ]] && $BRANCHES ; then
 			ISBRANCH=true
-			monkey_catch -n --pad "$PAD" --color "$YELLOW" -n --silent "$SILENT" --prompt "$PROMPT" "$func" "$dir" "$path" "$module"
+            if [[ " ${NOT[@]} " =~ " $module " ]]; then
+                monkey_say "Skip $module" -n --pad "$PAD" --color "$YELLOW" -n --silent "$SILENT" 
+            else
+                monkey_catch -n --pad "$PAD" --color "$YELLOW" -n --silent "$SILENT" --prompt "$PROMPT" --show_command "$SHOW_COMMAND" --ok "${OK[@]}" --func "$func" "$dir" "$path" "$module" "${funcargs[@]}" 
+            fi
 			ISBRANCH=false
 		fi
 		
@@ -977,37 +1023,50 @@ climb() {
 			for ((i=0; i<$len; i++)); do
 				local name="${names[$i]}"
 				local subpath="$(get_module_key "$dir/$path/.gitmodules" "$name" "path")"
-				climbing "$func" "$dir/$path" "$subpath" "$name"
+				climbing "$func" "$dir/$path" "$subpath" "$name" "${funcargs[@]}"
 			done
 		elif $LEAVES && (( DEPTH < MAXDEPTH )) && [ $INITIALIZATION == false ]; then
 			if $TREE ; then
 				monkey_say "$SEP ${name} $(get_module_header $MODULE_HEADER)" -n --pad "$PAD" --color "$GREEN" --silent "$SILENT"
 			fi
 			ISLEAVES=true
-			monkey_catch -n --pad "$PAD" --color "$GREEN" --silent "$SILENT" --prompt "$PROMPT" "$func" "$dir" "$path" "$module"
+            if [[ " ${NOT[@]} " =~ " $module " ]]; then
+                monkey_say "Skip $module" -n --pad "$PAD" --color "$GREEN" -n --silent "$SILENT" 
+            else
+                monkey_catch -n --pad "$PAD" --color "$GREEN" --silent "$SILENT" --prompt "$PROMPT" --show_command "$SHOW_COMMAND" --ok "${OK[@]}" --func "$func" "$dir" "$path" "$module" "${funcargs[@]}" 
+            fi 
 			ISLEAVES=false
 		fi
 		
 		# On the way down
 		if (( DEPTH > 0 ))	&& ! $UPWARD && [ -f "$dir/$path/.gitmodules" ] && $TREE ; then
-			monkey_say "$SEP ${name} $(get_module_header $MODULE_HEADER)" -n --pad "$PAD" --color "$YELLOW" --silent "$SILENT" --prompt "$PROMPT" 
+			monkey_say "$SEP ${name} $(get_module_header $MODULE_HEADER)" -n --pad "$PAD" --color "$YELLOW" --silent "$SILENT"
 		fi
 		
 		if (( DEPTH > 0 ))	&& ! $UPWARD && [ -f "$dir/$path/.gitmodules" ] && $BRANCHES ; then
 			ISBRANCH=true
-			monkey_catch -n --pad "$PAD" --color "$YELLOW" --silent "$SILENT" --prompt "$PROMPT"  "$func" "$dir" "$path" "$module"
+            if [[ " ${NOT[@]} " =~ " $module " ]]; then
+                monkey_say "Skip $module" -n --pad "$PAD" --color "$YELLOW" -n --silent "$SILENT" 
+            else
+                monkey_catch -n --pad "$PAD" --color "$YELLOW" --silent "$SILENT" --prompt "$PROMPT" --show_command "$SHOW_COMMAND" --ok "${OK[@]}" --func "$func" "$dir" "$path" "$module" "${funcargs[@]}"
+            fi 
 			ISBRANCH=false
 		fi
 		
 		(( DEPTH -= 1 ))
 	}
 	
-	climb_parse LEAVES BRANCHES TRUNK UPWARD SHOW_HELP func INITIALIZATION BEGIN END SILENT TREE FLAT MODULE_HEADER PROMPT MESSAGE "${@}"
+	climb_parse SHOW_HELP LEAVES BRANCHES TRUNK UPWARD INITIALIZATION BEGIN END SILENT TREE FLAT MODULE_HEADER PROMPT MESSAGE SHOW_COMMAND NOT func FUNCARGS OK "${@}" 
 	
-	if $SHOW_HELP; then
+    
+	if $SHOW_HELP ; then
 		climb_help
 		exit 1
 	fi
+    
+    if [[ -z $func ]] ; then
+        error -m "climb had not function given to it."
+    fi
 	
 	if $UPWARD ; then
 		SEP="└──"
@@ -1021,7 +1080,7 @@ climb() {
 	
 	if $BEGIN ; then
 		ISBEGIN=true
-		monkey_catch -n --color "$CYAN" --silent "$SILENT" --prompt "$PROMPT"  "$func" "$dir" "$dir" "Begin"
+		monkey_catch -n --color "$CYAN" --silent "$SILENT" --prompt "$PROMPT" --show_command "$SHOW_COMMAND" --ok "${OK[@]}" --func "$func" "$dir" "$dir" "Begin" "${FUNCARGS[@]}"
 		ISBEGIN=false		
 	fi
 			
@@ -1032,7 +1091,7 @@ climb() {
 		repo_name=$(basename "$repo_path")	
 		monkey_say "${repo_name} $(get_module_header $MODULE_HEADER)" -n --color "$RED" --silent "$SILENT"
 		fi
-		monkey_catch -n --color "$RED" --silent "$SILENT" --prompt "$PROMPT"  "$func" "$dir" "$dir" "Trunk"
+		monkey_catch -n --color "$RED" --silent "$SILENT" --prompt "$PROMPT" --show_command "$SHOW_COMMAND" --ok "${OK[@]}" --func "$func" "$dir" "$dir" "Trunk" "${FUNCARGS[@]}"
 		ISTRUNK=false		
 	fi
 	
@@ -1045,7 +1104,7 @@ climb() {
 		for ((i=0; i<$len; i++)); do
 			local name="${names[$i]}"
 			local path="$(get_module_key "$dir/.gitmodules" "$name" "path")"
-			climbing "$func" "$dir" "$path" "$name"
+			climbing "$func" "$dir" "$path" "$name" "${FUNCARGS[@]}"
 		done
 	fi
 	
@@ -1056,20 +1115,25 @@ climb() {
 		repo_name=$(basename "$repo_path")	
 		monkey_say "${repo_name} $(get_module_header $MODULE_HEADER)" -n --color "$RED" --silent "$SILENT"
 		fi
-		monkey_catch -n --color "$RED" --silent "$SILENT" --prompt "$PROMPT"  "$func" "$dir" "$dir" "Trunk"
+		monkey_catch -n --color "$RED" --silent "$SILENT" --prompt "$PROMPT" --show_command "$SHOW_COMMAND" --ok "${OK[@]}" --func "$func" "$dir" "$dir" "Trunk" "${FUNCARGS[@]}"
 		ISTRUNK=false
 	fi	
 		
 	if $END ; then
 		ISBEGIN=true
-		monkey_catch -n --color "$CYAN" --silent "$SILENT" --prompt "$PROMPT"  "$func" "$dir" "$dir" "End"
+		monkey_catch -n --color "$CYAN" --silent "$SILENT" --prompt "$PROMPT" --show_command "$SHOW_COMMAND" --ok "${OK[@]}" --func "$func" "$dir" "$dir" "End" "${FUNCARGS[@]}"
 		ISBEGIN=false		
 	fi
 		
 	unset -f climbing -f climb_parse -f get_module_header -f gitbranch -f gitbranch_modbranch
 }
 
+dummy(){
+    echo "Hi !"
+}
+
 plant() {
+    # Plant is broken and need to be updated to work with new climb.
 	local SHOW_HELP=false
 	local BRANCH=""
 	local NEWTREEPATH=".."
@@ -1119,9 +1183,8 @@ plant() {
 		local path="$2"
 		local -i PAD="$3"
 		local color="$4"
-		#echo ""
-		monkey_say -n --pad "$((PAD+4))" --color "$CYAN" "git -C $dir submodule update --init $path"
-		monkey_catch -n --pad "$((PAD+4))" --color "$WHITE" git -C "$dir" submodule update --init "$path"
+		monkey_say "git -C $dir submodule update --init $path" -n --pad "$((PAD+4))" --color "$CYAN" 
+		monkey_catch -n --pad "$((PAD+4))" --color "$WHITE" --func git -C "$dir" submodule update --init "$path"
 		echo ""
 		if [ "$?" != 0 ]; then
 			error -m "Initialization failed."
@@ -1223,26 +1286,26 @@ plant() {
 	
 	answer="$(yes_no -m "Initialize and setup submodules ?"  -d Y )"
 	if $answer ; then
-		git-monkey climb plant_tree --init --trunk --branches --leaves --up
+		climb --init --trunk --branches --leaves --up --func plant_tree 
 	fi
 	
 	answer="$(yes_no -m "Are there submodules's to protect from being pushed/mutes ? "  -d Y )"
 	if $answer ; then
-		git-monkey mute
+		mute
 	fi
 	
 	monkey_say "INITIALIZATION DONE ! " -n --color "$CYAN" 
-	git-monkey tree
+	tree
 	
 	answer="$(yes_no -m "Commit changes ? "  -d N )"
 	if $answer ; then
-		git-monkey DOS2UNIX
-		git-monkey grow -m "$BRANCH worktree initialization."
+		DOS2UNIX
+		grow -m "$BRANCH worktree initialization."
 	fi
 	
 	answer="$(yes_no -m "Push ? "  -d N )"
 	if $answer ; then
-		git-monkey push
+		push
 	fi
 	
 	unset -f plant_tree -f plant_parse -f set_branch -f init_module
@@ -1260,17 +1323,19 @@ local str="Legend :
 		#echo ""
 	fi
 	}
-	climb command --tree --header 2 --begin --trunk --branches --leaves --up
+	climb  --tree --header 2 --begin --trunk --branches --leaves --up command
 	
 	unset -f command
 }
 
-checkout() {
+spawn() {
 	local SHOW_HELP=false
 	
-	checkout_parse() {
+	parse() {
 		local -n show_help_ref=$1
+
 		shift 1
+		
 		while [[ $# -gt 0 ]]; do
 			case "$1" in
 				--help)
@@ -1284,7 +1349,42 @@ checkout() {
 		done
 	}
 	
-	checkout_parse SHOW_HELP "${@}"
+	parse SHOW_HELP "${@}"
+	if $SHOW_HELP; then
+		status_help
+		exit 1
+	fi
+	
+	git -C "$dir" submodule update --init --recursive
+	checkout
+	tree
+	
+	unset -f parse
+}
+
+checkout() {
+	local SHOW_HELP=false
+    local CLIMBARGS=()
+	
+	checkout_parse() {
+		local -n show_help_ref=$1
+        local -n climb_args_ref=$2
+		shift 2
+		while [[ $# -gt 0 ]]; do
+			case "$1" in
+				--help)
+					show_help_ref=true
+					shift
+					;;
+				*)
+                    climb_args_ref+=("$1") 
+                    shift
+                ;;
+			esac
+		done
+	}
+	
+	checkout_parse SHOW_HELP CLIMBARGS "${@}"
 	if $SHOW_HELP; then
 		checkout_help
 		exit 1
@@ -1295,13 +1395,13 @@ checkout() {
 		local path="$2"
 		local name="$3"
 		local branch=$(get_module_key "$dir/.gitmodules" "$name" "branch")
-		if [ -n "$branch" ]; then
-			monkey_say "$path checkout $branch" -n --color "$GREEN"
+		if [[ -n "$branch" ]]; then
+			# monkey_say "$path checkout $branch" -n --color "$GREEN"
 			git -C "$dir/$path" checkout "$branch" 
 		fi
 	}
 	
-	climb checkout_module --tree --header 2 --branches --leaves --up
+	climb --tree --header 2 --branches --leaves --up "${CLIMBARGS[@]}" --func checkout_module 
 	
 	unset -f checkout_module -f checkout_parse
 }
@@ -1310,12 +1410,14 @@ pull() {
 	local SHOW_HELP=false
 	local FORCE_REBASE=false
 	local FORCE_MERGE=false
+    local CLIMBARGS=()
 	
 	pull_parse() {
 		local -n show_help_ref=$1
 		local -n force_rebase_ref=$2
 		local -n force_merge_ref=$3
-		shift 3
+        local -n climb_args_ref=$4
+		shift 4
 		
 		while [[ $# -gt 0 ]]; do
 			case "$1" in
@@ -1332,8 +1434,9 @@ pull() {
 					shift
 					;;
 				*)
-					error -m "Unknown option: $1"
-					;;
+                    climb_args_ref+=("$1") 
+                    shift
+                ;;
 			esac
 		done
 	}
@@ -1368,13 +1471,13 @@ pull() {
 		fi
 	}
 	
-	pull_parse SHOW_HELP FORCE_REBASE FORCE_MERGE "${@}"
+	pull_parse SHOW_HELP FORCE_REBASE FORCE_MERGE CLIMBARGS "${@}"
 	if $SHOW_HELP; then
 		pull_help
 		exit 1
 	fi
 	
-	climb pull_module --tree --header 1 --trunk --branches --leaves --up
+	climb --tree --header 1 --trunk --branches --leaves --up "${CLIMBARGS[@]}" --func pull_module
 	
 	unset -f pull_module -f pull_parse
 }
@@ -1382,11 +1485,13 @@ pull() {
 push() {
 	local SHOW_HELP=false
 	local FORCE=false
+    local CLIMBARGS=()
 	
 	push_parse() {
 		local -n show_help_ref=$1
 		local -n force_ref=$2
-		shift 2
+		local -n climb_args_ref=$3
+        shift 3
 		
 		while [[ $# -gt 0 ]]; do
 			case "$1" in
@@ -1399,8 +1504,9 @@ push() {
 					shift
 					;;
 				*)
-					error -m "Unknown option: $1"
-					;;
+                    climb_args_ref+=("$1") 
+                    shift
+                ;;
 			esac
 		done
 	}
@@ -1429,17 +1535,17 @@ push() {
 		if [ "$?" != 0 ] ; then
 			error -m "$LASTOUTPUT"
 		else 
-			monkey_say --color "$CYAN" "$LASTOUTPUT " -n
+			monkey_say "$LASTOUTPUT " --color "$CYAN"  -n
 		fi	
 	}
 	
-	push_parse SHOW_HELP FORCE "${@}"
+	push_parse SHOW_HELP FORCE CLIMBARGS "${@}"
 	if $SHOW_HELP; then
 		push_help
 		exit 1
 	fi
 	
-	climb push_module --tree --header 1 --trunk --branches --leaves --up
+	climb --tree --header 1 --trunk --branches --leaves --up "${CLIMBARGS[@]}" --func push_module 
 	
 	unset -f push_module -f push_parse
 }
@@ -1450,12 +1556,14 @@ add() {
 	local SHOW_HELP=false
 	local ALL=false
 	local FILE=""
+    local CLIMBARGS=()
 
 	add_parse() {
 	local -n show_help_ref=$1
 	local -n all_ref=$2
 	local -n file_ref=$3
-	shift 3
+	local -n climb_args_ref=$4
+    shift 4
 
 	while [[ $# -gt 0 ]]; do
 	  case "$1" in
@@ -1480,7 +1588,8 @@ add() {
 			fi
 		;;
 		*)
-		  error -m "Unknown option: $1"
+			climb_args_ref+=("$1") 
+            shift
 		;;
 	  esac
 	done
@@ -1489,28 +1598,26 @@ add() {
 		local dir="$1"
 		local path="$2"
 		local name="$3"
-
-		monkey_say "$dir add " -n --color "$GREEN"
-
+        
 		if [[ -n "$FILE" ]]; then
 			git -C "$dir/$path" add "$FILE"
 		elif $ALL ; then
 			git -C "$dir/$path" add --all 
 			if ! $ISTRUNK ; then
-				git -C "$dir" reset "$name"
+				git -C "$dir" reset "$path"
 			fi
 		fi
 		
 	}
-
-	add_parse SHOW_HELP ALL FILE "${@}"
+    
+	add_parse SHOW_HELP ALL FILE CLIMBARGS "${@}"
 
 	if $SHOW_HELP || [[ $ALL == false &&  -z "$FILE" ]]; then
 	add_help
 	exit 1
 	fi
 
-	climb add_module --tree --header 1 --trunk --branches --leaves --up
+	climb --tree --header 1 --trunk --branches --leaves --up "${CLIMBARGS[@]}" --ok 128 --func add_module 
 
 	unset -f add_module -f add_parse 
 }
@@ -1519,10 +1626,12 @@ add() {
 # I'm avoiding collision with bash's reset function for now
 reset_modules() {
 	local SHOW_HELP=false
+    local CLIMBARGS=()
 	
 	reset_parse() {
 		local -n show_help_ref=$1
-		shift 1
+		local -n climb_args_ref=$2
+        shift 2
 		
 		while [[ $# -gt 0 ]]; do
 			case "$1" in
@@ -1531,9 +1640,9 @@ reset_modules() {
 					shift
 					;;
 				*)
-					echo "Unknown option: $1"
-					exit 1
-					;;
+                    climb_args_ref+=("$1") 
+                    shift
+                ;;
 			esac
 		done
 	}
@@ -1545,13 +1654,13 @@ reset_modules() {
 		git -C "$dir/$path" reset
 	}
 	
-	reset_parse SHOW_HELP "${@}"
+	reset_parse SHOW_HELP CLIMBARGS "${@}"
 	if $SHOW_HELP; then
 		reset_help
 		exit 1
 	fi
 	
-	climb reset_module --tree --header 1 --trunk --branches --leaves --up
+	climb --tree --header 1 --trunk --branches --leaves --up "${CLIMBARGS[@]}" --func reset_module 
 	
 	unset -f reset_module -f reset_parse
 }
@@ -1559,13 +1668,13 @@ reset_modules() {
 commit() {
 	local SHOW_HELP=false
 	local MESSAGE=""
-	local OPTIONS="--trunk --branches --leaves"
+    local CLIMBARGS=()
 
 	commit_parse() {
 		local -n show_help_ref=$1
 		local -n message_ref=$2
-		local -n options_ref=$3
-		shift 3
+		local -n climb_args_ref=$3
+        shift 3
 		
 		while [[ $# -gt 0 ]]; do
 			case "$1" in
@@ -1581,55 +1690,27 @@ commit() {
 						error -m "-m requires a commit message."
 					fi
 					;;
-				--trunk)
-					if [[ ! $options_ref =~ "--trunk" ]]; then
-						options_ref="${options_ref} --trunk"
-					fi
-					shift
-					;;
-				--no-trunk)
-					options_ref=$(echo "${options_ref}" | sed 's/--trunk//g')
-					shift
-					;;
-				--branches)
-					if [[ ! $options_ref =~ "--branches" ]]; then
-						options_ref="${options_ref} --branches"
-					fi
-					shift
-					;;
-				--no-branch)
-					options_ref=$(echo "${options_ref}" | sed 's/--branches//g')
-					shift
-					;;
-				--leaves)
-					if [[ ! $options_ref =~ "--leaves" ]]; then
-						options_ref="${options_ref} --leaves"
-					fi
-					shift
-					;;
-				--no-leaves)
-					options_ref=$(echo "${options_ref}" | sed 's/--leaves//g')
-					shift
-				;;
 				*)
-					error -m "Unknown option: $1"
-					;;
+                    climb_args_ref+=("$1") 
+                    shift
+                ;;
 			esac
 		done
-		# Remove any leading or trailing whitespace
-		options_ref=$(echo "$options_ref" | xargs)
 	}
 
 	commit_module(){
 		local dir="$1"
 		local path="$2"
-		local name="$3"
-
-		monkey_say "$path commit " -n --color "$GREEN" 
-		git -C "$dir/$path" commit -m "$MESSAGE"
+		#local name="$3" 
+        local MESSAGE="$4"
+		if [[ -z $(git -C "$dir/$path" status --porcelain) ]]; then
+			echo "Nothing to commit, working tree clean."
+		else
+			git -C "$dir/$path" commit -m "$MESSAGE"
+		fi
 	}
 
-	commit_parse SHOW_HELP MESSAGE OPTIONS "${@}"
+	commit_parse SHOW_HELP MESSAGE CLIMBARGS "${@}"
 	if $SHOW_HELP; then
 		commit_help
 		exit 1
@@ -1639,7 +1720,7 @@ commit() {
 		error -m "Commit message is required. Use -m <message> to provide a commit message."
 	fi
 
-	climb commit_module ${OPTIONS[@]} --tree --header 1 --up
+	climb -m "Commiting file change only" --tree --header 1 --trunk --branches --leaves --up "${CLIMBARGS[@]}" --func commit_module "$MESSAGE"
 
 	unset -f commit_module -f commit_parse
 }
@@ -1649,11 +1730,13 @@ grow() {
 	# it you want to commit individual file see add and commit
 	local SHOW_HELP=false
 	local MESSAGE=""
+    local CLIMBARGS=()
 	
 	grow_parse() {
 		local -n show_help_ref=$1
 		local -n message_ref=$2
-		shift 2
+		local -n climb_args_ref=$3
+		shift 3
 				
 		while [[ $# -gt 0 ]]; do
 			case "$1" in
@@ -1670,8 +1753,9 @@ grow() {
 					fi
 					;;
 				*)
-					error -m "Unknown option: $1"
-					;;
+                    climb_args_ref+=("$1") 
+                    shift
+                ;;
 			esac
 		done
 	}
@@ -1690,7 +1774,8 @@ grow() {
 	grow_module(){
 		local dir="$1"
 		local path="$2"
-		local name="$3"
+		#local name="$3"
+        local MESSAGE="$4"
 		if $ISLEAVES ; then
 			git -C "$dir" add "$path"
 		elif $ISTRUNK ; then
@@ -1702,7 +1787,7 @@ grow() {
 	
 	}
 	
-	grow_parse SHOW_HELP MESSAGE "${@}"
+	grow_parse SHOW_HELP MESSAGE CLIMBARGS "${@}"
 	if $SHOW_HELP; then
 		grow_help
 		exit 1
@@ -1712,7 +1797,7 @@ grow() {
 		error -m "Commit message is required. Use -m <message> to provide a commit message."
 	fi
 	
-	climb grow_module -m "Add and Commit modules" --tree --header 1 --trunk --branches --leaves --down
+	climb -m "Add and Commit modules" --tree --header 1 --trunk --branches --leaves --down "${CLIMBARGS[@]}" --func grow_module "$MESSAGE"
 	
 	unset -f grow_module -f grow_parse -f _commit
 }
@@ -1723,14 +1808,13 @@ mute() {
 	local COMMAN=""
 	local MESSAGE=""
 	local SHOW=false
-	local CMDARGS=()
+    local CLIMBARGS=()
 	
 	mute_parse() {
 		local -n show_help_ref=$1
 		local -n undo_ref=$2
 		local -n show_ref=$3
-		local -n cmd_args_ref=$4
-
+        local -n climb_args_ref=$4
 		shift 4
 		while [[ $# -gt 0 ]]; do
 			case "$1" in
@@ -1746,38 +1830,38 @@ mute() {
 					show_ref=true
 					shift
 					;;
-				--*)
-					cmd_args_ref+=("$1")
-					shift
-					;;
-				-*)
-					cmd_args_ref+=("$1")
-					shift
-					;;
 				*)
-					error -m "Unknown option: $1"
-					;;
+                    climb_args_ref+=("$1")
+                    shift                    
+                ;;
 			esac
 		done
 	}
 	
 	mute_cmd() {
+        local dir="$1"
+		local path="$2"
+		#local name="$3"
 		git -C "$dir/$path" remote set-url --push origin no_push
 	}
 	
 	undo_cmd() {
+        local dir="$1"
+		local path="$2"
+		#local name="$3"
 		pullurl="$(git -C "$dir/$path" remote get-url origin)"
 		git -C "$dir/$path" remote set-url --push origin "$pullurl"
 	}
 	
 	show_cmd() {
-		#pullurl="$(git -C "$dir/$path" remote get-url origin)"
-		#echo "pull : $pullurl"
+        local dir="$1"
+		local path="$2"
+		#local name="$3"
 		pushurl="$(git -C "$dir/$path" remote get-url origin --push)"
 		echo "$pushurl"
 	}
 	
-	mute_parse SHOW_HELP UNDO SHOW CMDARGS "${@}"
+	mute_parse SHOW_HELP UNDO SHOW CLIMBARGS "${@}"
 	if $SHOW_HELP; then
 		mute_help
 		exit 1
@@ -1795,9 +1879,9 @@ mute() {
 	fi 
 	
 	if ! $SHOW; then
-		climb --prompt --tree --header 1 --trunk --branches --leaves -m "$MESSAGE" $COMMAND  "${CMDARGS[@]}" 
+		climb --prompt --tree --header 1 --trunk --branches --leaves -m "$MESSAGE" "${CLIMBARGS[@]}" --func $COMMAND 
 	else
-		climb --tree --header 1 --trunk --branches --leaves -m "$MESSAGE" $COMMAND "${CMDARGS[@]}" 
+		climb --tree --header 1 --trunk --branches --leaves -m "$MESSAGE" "${CLIMBARGS[@]}" --func $COMMAND 
 	fi
 	
 	unset -f mute_parse  -f mute_cmd -f undo_cmd -f show_cmd
@@ -1805,10 +1889,12 @@ mute() {
 
 status() {
 	local SHOW_HELP=false
+    local CLIMBARGS=()
 	
 	parse() {
 		local -n show_help_ref=$1
-		shift 1
+        local -n climb_args_ref=$2
+		shift 2
 
 		while [[ $# -gt 0 ]]; do
 			case "$1" in
@@ -1817,8 +1903,9 @@ status() {
 					shift
 					;;
 				*)
-					error -m "Unknown option: $1"
-					;;
+                    climb_args_ref+=("$1")
+                    shift
+                ;;
 			esac
 		done
 	}
@@ -1837,18 +1924,20 @@ status() {
 		printf "$status"
 	}
 	
-	parse SHOW_HELP "${@}"
+	parse SHOW_HELP CLIMBARGS "${@}"
+    
 	if $SHOW_HELP; then
 		status_help
 		exit 1
 	fi
 	
-	climb command --tree --header 1 --trunk --branches --leaves
+	climb --tree --header 1 --trunk --branches --leaves "${CLIMBARGS[@]}" --func command 
 	
 	unset -f parse -f command
 }
 
 branch() {
+    #deprecated
 	local SHOW_HELP=false
 	
 	parse() {
@@ -1881,7 +1970,7 @@ branch() {
 		exit 1
 	fi
 	
-	climb command --tree --header 1 --trunk --branches --leaves
+	climb --tree --header 1 --trunk --branches --leaves --func command 
 	
 	unset -f parse -f command
 }
@@ -1891,7 +1980,7 @@ DOS2UNIX() {
 		dos2unix "$1/.gitmodules"
 	}
 	
-	climb command --tree --header 1 --trunk --branches --leaves
+	climb --tree --header 1 --trunk --branches --leaves --func command 
 	
 	unset -f command
 }
@@ -1900,12 +1989,15 @@ IGNORE() {
   local SHOW_HELP=false
   local REMOVE=false
   local LINE=""
+  local CLIMBARGS=()
+  local MESSAGE=""
 
   parse() {
     local -n show_help_ref=$1
     local -n remove_ref=$2
     local -n line_ref=$3
-    shift 3
+    local -n climb_args_ref=$4
+    shift 4
 
     while [[ $# -gt 0 ]]; do
 		case "$1" in
@@ -1926,13 +2018,14 @@ IGNORE() {
 			shift
 		;; 
 		*)
-			error -m "Unknown option: $1"
+			climb_args_ref+=("$1") 
+            shift
 		;;
 		esac
     done
   }
 
-  parse SHOW_HELP REMOVE LINE "${@}"
+  parse SHOW_HELP REMOVE LINE CLIMBARGS "${@}"
   
   if $SHOW_HELP; then
     IGNORE_help
@@ -1972,12 +2065,17 @@ IGNORE() {
         { if (gensub(/^[ \t]+|[ \t]+$/, "", "g") != trimmed_line) print }' "$file" > "${file}.tmp" && mv "${file}.tmp" "$file"
   }
 
+   if $REMOVE ; then
+		MESSAGE="Removing $LINE from .gitignore"
+	else
+		MESSAGE="Adding $LINE to .gitignore"
+	fi
+
   # Function to apply the add or remove operation
   command() {
-	# Defined in prompt
-    # local dir="$1"
-    # local path="$2"
-    # local name="$3"
+    local dir="$1"
+    local path="$2"
+    local name="$3"
 	
 	local file=""
 	if $ISTRUNK ; then	
@@ -1999,7 +2097,7 @@ IGNORE() {
   }
 
   # Call the command function to apply to all submodules
-  climb command -m "Adding $LINE to .gitignore" --tree --header 1 --trunk --branches --leaves
+  climb -m "$MESSAGE" --tree --header 1 --trunk --branches --leaves "${CLIMBARGS[@]}" --func command 
 
   # Clean up function definitions
   unset -f add_line_if_not_exists -f remove_line_if_exists -f parse -f command
@@ -2007,10 +2105,12 @@ IGNORE() {
 
 RESTORE() {
 	local FILE=""
+    local CLIMBARGS=()
 
 	parse() {
 	local -n file_ref=$1
-	shift 1
+	local -n climb_args_ref=$2
+	shift 2
 
 	while [[ $# -gt 0 ]]; do
 	  case "$1" in
@@ -2023,8 +2123,9 @@ RESTORE() {
 			fi
 		;;
 		*)
-		  error -m "Unknown option: $1"
-		;;
+            climb_args_ref+=("$1") 
+            shift
+        ;;
 	  esac
 	done
 	}
@@ -2038,9 +2139,9 @@ RESTORE() {
 		git -C "$dir/$path" restore "$FILE"
 	}
 
-	parse FILE "${@}"
+	parse FILE CLIMBARGS "${@}"
 	
-	climb command --trunk --branches --leaves --up
+	climb --trunk --branches --leaves --up "${CLIMBARGS[@]}" --func command 
 
 	unset -f command -f parse 
 }
