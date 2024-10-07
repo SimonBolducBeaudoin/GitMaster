@@ -135,7 +135,6 @@ Examples:
     echo "$help_message"
 }
 
-
 plant_help() {
 local help_message="
 Plants a new (git) worktree based on an existing branch of the project,
@@ -265,6 +264,15 @@ local help_message="
 Display a short status for each modules
 
 Usage: git-monkey [...] status
+"
+echo "$help_message"
+}
+
+stash_help() {
+local help_message="
+Stash or pop all changes
+
+Usage: git-monkey [...] stash [pop]
 "
 echo "$help_message"
 }
@@ -692,7 +700,7 @@ git-monkey() {
 
         shift 6
 
-        local public_commands=("spawn" "climb" "tree" "plant" "grow" "status" "checkout" "pull" "push" "add" "reset" "commit" "mute" "DOS2UNIX" "IGNORE" "RESTORE")
+        local public_commands=("spawn" "climb" "tree" "plant" "grow" "status" "stash" "checkout" "pull" "push" "add" "reset" "commit" "mute" "DOS2UNIX" "IGNORE" "RESTORE")
         local private_commands=("error" "monkey_catch" "monkey_say" "error" "yes_no" "get_module_names" "get_module_key" "set_module_key" "dummy")
         local deprecated_commands=("branch")
 
@@ -1002,7 +1010,7 @@ climb() {
 		current_branch=$(git -C "$dir/$path" rev-parse --abbrev-ref HEAD)
 		# On the way up
 		if (( DEPTH > 0 )) && $UPWARD && [[ $INITIALIZATION == true || -f "$dir/$path/.gitmodules" ]] && $TREE ; then
-			monkey_say "$SEP ${name} $(get_module_header $MODULE_HEADER)" -n --pad "$PAD" --color "$YELLOW" --silent "$SILENT"
+			monkey_say "$SEP ${module} $(get_module_header $MODULE_HEADER)" -n --pad "$PAD" --color "$YELLOW" --silent "$SILENT"
 		fi
 		
 		if (( DEPTH > 0 )) && $UPWARD && [[ $INITIALIZATION == true || -f "$dir/$path/.gitmodules" ]] && $BRANCHES ; then
@@ -1027,7 +1035,7 @@ climb() {
 			done
 		elif $LEAVES && (( DEPTH < MAXDEPTH )) && [ $INITIALIZATION == false ]; then
 			if $TREE ; then
-				monkey_say "$SEP ${name} $(get_module_header $MODULE_HEADER)" -n --pad "$PAD" --color "$GREEN" --silent "$SILENT"
+				monkey_say "$SEP ${module} $(get_module_header $MODULE_HEADER)" -n --pad "$PAD" --color "$GREEN" --silent "$SILENT"
 			fi
 			ISLEAVES=true
             if [[ " ${NOT[@]} " =~ " $module " ]]; then
@@ -1040,7 +1048,7 @@ climb() {
 		
 		# On the way down
 		if (( DEPTH > 0 ))	&& ! $UPWARD && [ -f "$dir/$path/.gitmodules" ] && $TREE ; then
-			monkey_say "$SEP ${name} $(get_module_header $MODULE_HEADER)" -n --pad "$PAD" --color "$YELLOW" --silent "$SILENT"
+			monkey_say "$SEP ${module} $(get_module_header $MODULE_HEADER)" -n --pad "$PAD" --color "$YELLOW" --silent "$SILENT"
 		fi
 		
 		if (( DEPTH > 0 ))	&& ! $UPWARD && [ -f "$dir/$path/.gitmodules" ] && $BRANCHES ; then
@@ -1514,9 +1522,6 @@ push() {
 		local dir="$1"
 		local path="$2"
 		local name="$3"
-		local LASTOUTPUT=""
-		
-		monkey_say "$path push " -n --color "$GREEN"
 		
 		# will return "no_push" when repo as been set to mute
 		pushurl="$(git -C "$dir/$path" remote get-url origin --push)"
@@ -1527,15 +1532,9 @@ push() {
 		fi
 		
 		if [ "$FORCE" != true ] ; then
-			LASTOUTPUT="$(git -C "$dir/$path" push 2>&1)"
+            git -C "$dir/$path" push
 		elif [ "$FORCE" == true ] ; then
-			LASTOUTPUT="$(git -C "$dir/$path" push --force 2>&1)"
-		fi
-		
-		if [ "$?" != 0 ] ; then
-			error -m "$LASTOUTPUT"
-		else 
-			monkey_say "$LASTOUTPUT " --color "$CYAN"  -n
+            git -C "$dir/$path" push --force
 		fi	
 	}
 	
@@ -1545,7 +1544,7 @@ push() {
 		exit 1
 	fi
 	
-	climb --tree --header 1 --trunk --branches --leaves --up "${CLIMBARGS[@]}" --func push_module 
+	climb -m "Pushing to remote." --tree --header 1 --trunk --branches --leaves --up "${CLIMBARGS[@]}" --func push_module 
 	
 	unset -f push_module -f push_parse
 }
@@ -1935,6 +1934,56 @@ status() {
 	
 	unset -f parse -f command
 }
+
+stash() {
+	local SHOW_HELP=false
+	local POP=false
+    local CLIMBARGS=()
+	
+	parse() {
+		local -n show_help_ref=$1
+		local -n pop_ref=$1
+        local -n climb_args_ref=$2
+		shift 3
+
+		while [[ $# -gt 0 ]]; do
+			case "$1" in
+				--help)
+					show_help_ref=true
+					shift
+					;;
+                pop)
+					pop_ref=true
+					shift
+					;;
+				*)
+                    climb_args_ref+=("$1")
+                    shift
+                ;;
+			esac
+		done
+	}
+	
+	command() {
+        if $POP ; then
+            git -C "$1/$2" stash pop
+        else
+            git -C "$1/$2" stash pop
+        fi
+	}
+	
+	parse SHOW_HELP POP CLIMBARGS "${@}"
+    
+	if $SHOW_HELP; then
+		stash_help
+		exit 1
+	fi
+	
+	climb --tree --header 1 --trunk --branches --leaves --down "${CLIMBARGS[@]}" --func command 
+	
+	unset -f parse -f command
+}
+
 
 branch() {
     #deprecated
