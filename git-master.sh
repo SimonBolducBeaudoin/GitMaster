@@ -304,7 +304,6 @@ monkey_catch() {
     local COLOR=0
     local MAX_PADDING=50
     local COMMANDS=()
-    local OUTPUT=""
     local EXTRA_LINE=false
 	local SHOW_COMMAND=false
 	local CMDOUT=""
@@ -452,7 +451,12 @@ monkey_catch() {
 		else
 			"${COMMANDS[@]}" > >(tee /dev/null | awk -v pad="$PADDING" -v color="$color" '{ printf "%s%*s%s\033[0m\n", color, pad, "", $0 }') 2> "$temp_file"
 			STATUS="$?"
-		fi						  
+		fi
+
+		local stderr_output
+		stderr_output=$(<"$temp_file")
+		rm -f "$temp_file" 
+		
 		local SKIP=false
         if [[ -n "${OK[*]}" && "$STATUS " =~ "${OK[@]}" ]] ; then 
             SKIP=true
@@ -464,13 +468,12 @@ monkey_catch() {
         fi
 		
 		if [[ $STATUS -ne 0 && "$SKIP" == false ]]; then
-			error -m "$temp_file" --status "$STATUS"								 
+			error -m "$stderr_output" --status "$STATUS"								 
 		elif [[ $STATUS -ne 0 && "$PASS" == true ]]; then
 			# This will not be padded properly ...
-			printf "\e[${COLOR}m%s\e[0m\n" "$OUTPUT"
+			printf "\e[${COLOR}m%s\e[0m\n" "$stderr_output"
 			return "$STATUS"										   			 
 		fi
-		rm -f "$temp_file" 
 		
 		# if $EXTRA_LINE; then
 			# printf "\n"
@@ -1317,20 +1320,7 @@ plant() {
 		local answer=''
 		local -i max_length=50
 		local -i PAD=$((DEPTH*4))
-		if $ISTRUNK ; then
-			current_branch=$(git -C "$dir/$path" rev-parse --abbrev-ref HEAD)
-			repo_path=$(git -C "$dir/$path" rev-parse --show-toplevel)
-			repo_name=$(basename "$repo_path")
-			monkey_say "${repo_name} ($current_branch)" -n --pad "$PAD" --color "$RED"
-		else
-			branch=$(get_module_key "$dir/.gitmodules" "$name" "branch")
-			if [ -n "$branch" ]; then
-				message="└── ${name} () [$branch]"
-			else 
-				message="└── ${name} () []"
-			fi
-			monkey_say "${message}" -n --pad "$PAD" --color "$CYAN"
-			
+		if $ISBRANCH ; then
 			init_module "$dir" "$path" "$PAD" "$WHITE"	
 			set_branch "$dir" "$path" "$name" "$((PAD+4))" "$WHITE"
 		fi	
@@ -1365,7 +1355,9 @@ plant() {
 			if $answer ; then
 			monkey_catch -n --color "$CYAN" --func git worktree prune
 			monkey_catch -n --color "$CYAN" --func git worktree add "$worktree_path" "$BRANCH"
-			fi				  
+			else
+				exit 1
+			fi
 		fi
 	fi
 	
@@ -1374,7 +1366,7 @@ plant() {
 	
 	answer="$(yes_no -m "Initialize and setup submodules ?"  -d Y )"
 	if $answer ; then
-		climb --init --trunk --branches --leaves --up --func plant_tree 
+		climb --tree --header 3 --init --trunk --branches --leaves --up --func plant_tree 
 	fi
 	
 	answer="$(yes_no -m "Are there submodules's to protect from being pushed/mutes ? "  -d Y )"
