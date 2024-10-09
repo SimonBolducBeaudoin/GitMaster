@@ -1240,11 +1240,7 @@ plant() {
 		local -i PAD="$3"
 		local color="$4"
 		monkey_say "git -C $dir submodule update --init $path" -n --pad "$((PAD+4))" --color "$CYAN" 
-		monkey_catch -n --pad "$((PAD+4))" --color "$WHITE" --func git -C "$dir" submodule update --init "$path"
-		echo ""
-		if [ "$?" != 0 ]; then
-			error -m "Initialization failed."
-		fi		
+		monkey_catch -n --pad "$((PAD+4))" --color "$WHITE" --func git -C "$dir" submodule update --init "$path"		
 	}
 	
 	set_branch() {
@@ -1329,13 +1325,21 @@ plant() {
 	repo_name=$(basename "$repo_path")
 	
 	local worktree_path="$dir/$NEWTREEPATH/${repo_name}_$BRANCH"
+	answer="$(yes_no -m "Fetch origin first ?"  -d Y )"
+	if $answer ; then
+		monkey_catch -n --color "$CYAN" --func git fetch origin
+	fi	
 		
 	answer="$(yes_no -m "Create new $BRANCH worktree ?"  -d Y )"
 	if $answer ; then
 		monkey_say "Planting branch '$BRANCH' at location '$worktree_path' " -n --color "$CYAN"
-		LASTOUTPUT="$(git worktree add "$worktree_path" "$BRANCH" 2>&1)"
-		if [ "$?" != 0 ] ; then
-			error -m "$LASTOUTPUT" 
+		monkey_catch -n --color "$CYAN" --except 128 --func git worktree add "$worktree_path" "$BRANCH"
+		if [ $? -eq 128 ]; then 
+			answer="$(yes_no -m "git worktree prune and try again ?"  -d Y )"
+			if $answer ; then
+			monkey_catch -n --color "$CYAN" --func git worktree prune
+			monkey_catch -n --color "$CYAN" --func git worktree add "$worktree_path" "$BRANCH"
+			fi				  
 		fi
 	fi
 	
