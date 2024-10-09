@@ -502,11 +502,11 @@ monkey_catch() {
 	
 
 monkey_say() {
-	local save_verb=VERBOSE
+	local save_verb="$VERBOSE"
 	VERBOSE=false
     args=("$@")          
     monkey_catch "${args[@]:1}" --func printf "$1"
-	VERBOSE=save_verb
+	VERBOSE="$save_verb"
 }
 
 error() {
