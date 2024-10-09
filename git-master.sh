@@ -701,6 +701,7 @@ set_module_key() {
     local new_value="$4"
     
     local temp_file=$(mktemp)
+	trap 'if [ -e "$temp_file" ]; then rm -f "$temp_file"; fi' EXIT
     
     awk_prgm='
     BEGIN { in_table = 0; found_key = 0 }
@@ -732,7 +733,11 @@ set_module_key() {
     '
     
     awk -F= -v table_name="$name" -v key="$key" -v new_value="$new_value" -v table_head="$SUBMODULE_NAME" -v trim_reg="$TRIM" "$awk_prgm" "$file" > "$temp_file"
-    mv "$temp_file" "$file"
+    if [[ $? -eq 0 ]]; then
+        mv "$temp_file" "$file"
+    else
+        echo "Error processing the file with awk." >&2
+    fi
 }
 
 git-monkey() {
