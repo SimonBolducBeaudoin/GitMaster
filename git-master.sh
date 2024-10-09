@@ -436,7 +436,8 @@ monkey_catch() {
 		fi
 
 		if [[ $SHOW_COMMAND == true || $VERBOSE == true ]] ; then
-			CMDOUT="$(printf '%s ' "${COMMANDS[@]}")"
+			CMDOUT="\$ "
+			CMDOUT+="$(printf '%s ' "${COMMANDS[@]}")"
 			CMDOUT=$(printf "%s" "$CMDOUT" | awk -v pad="$PADDING" '{ printf "%*s%s\n", pad, "", $0 }')
 			printf "\e[${COLOR}m%s\e[0m\n" "$CMDOUT"
 		fi
