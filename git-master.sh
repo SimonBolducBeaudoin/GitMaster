@@ -453,11 +453,11 @@ monkey_catch() {
 			STATUS="$?"
 		fi						  
 		local SKIP=false
-        if [[ "$STATUS " =~ "${OK[@]}" ]] ; then 
+        if [[ -n "${OK[*]}" && "$STATUS " =~ "${OK[@]}" ]] ; then 
             SKIP=true
         fi
 		local PASS=false
-        if [[ "$STATUS " =~ "${EXCEPT[@]}" ]] ; then
+        if [[ -n "${EXCEPT[*]}" && "$STATUS " =~ "${EXCEPT[@]}" ]] ; then
 			SKIP=true
             PASS=true
         fi
