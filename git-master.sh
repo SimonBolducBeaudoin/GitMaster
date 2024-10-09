@@ -453,12 +453,12 @@ monkey_catch() {
 			"${COMMANDS[@]}" > /dev/null 2> "stderr_file"
 			STATUS="$?"
 		else
-			"${COMMANDS[@]}" > >(tee /dev/null | awk -v pad="$PADDING" -v color="$color" '{ printf "%s%*s%s\033[0m\n", color, pad, "", $0 }') 2> "$temp_file"
+			"${COMMANDS[@]}" > >(tee /dev/null | awk -v pad="$PADDING" -v color="$color" '{ printf "%s%*s%s\033[0m\n", color, pad, "", $0 }') 2> "$stderr_file"
 			STATUS="$?"
 		fi
 
 		local stderr_output
-		stderr_output=$(<"$temp_file")
+		stderr_output=$(<"$stderr_file")
 		
 		
 		local SKIP=false
