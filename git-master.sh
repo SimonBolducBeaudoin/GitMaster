@@ -2278,6 +2278,6 @@ RESTORE() {
 
 git-monkey "${@}"
 
-rm -f "$stderr_file"
+if [ -e "$stderr_file" ]; then rm -f "$stderr_file"; fi
 )
 
