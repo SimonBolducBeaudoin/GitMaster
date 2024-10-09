@@ -494,6 +494,9 @@ monkey_catch() {
 		core
 	fi
 	
+	#Passing the returned value to the global scope
+	return "$?"											
+	
     unset -f monkey_catch_parse -f core
 }
 	
