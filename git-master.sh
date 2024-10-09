@@ -508,10 +508,12 @@ monkey_say() {
 error() {
     local MESSAGE=""               
 	local OUT="GIT-MONKEY ERROR:"
+	local -i EXITSTATUS=1
 
     error_parse() {
         local -n message_ref=$1
-        shift 1
+        local -n exitstatus_ref=$2
+        shift 2
 
         while (( "$#" )); do
             case "$1" in
@@ -523,11 +525,17 @@ error() {
                         return 1
                     fi
                     ;;
+				--status)
+                    if [[ -n "$2" ]] && [[ "$2" =~ ^[0-9]+$ ]]; then
+                        exitstatus_ref="$2"
+                        shift 2
+                    fi
+                    ;;
             esac
         done
     }
 
-    error_parse MESSAGE "$@"
+    error_parse MESSAGE EXITSTATUS "$@"
 
 	if [[ -n "$MESSAGE" ]] ; then
 		OUT+="\n\n"
@@ -566,7 +574,7 @@ error() {
     done
 	
     printf "\e[31m%s\e[0m\n" "$(printf "$OUT")"
-    exit 1
+    exit "$EXITSTATUS"
 }
 
 yes_no() {
