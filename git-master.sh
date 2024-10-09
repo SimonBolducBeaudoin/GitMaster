@@ -459,7 +459,7 @@ monkey_catch() {
 
 		local stderr_output
 		stderr_output=$(<"$temp_file")
-		rm -f "$temp_file" 
+		
 		
 		local SKIP=false
         if [[ -n "${OK[*]}" && "$STATUS " =~ "${OK[@]}" ]] ; then 
