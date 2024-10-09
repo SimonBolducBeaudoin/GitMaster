@@ -20,6 +20,7 @@ ISBRANCH=false
 ISLEAVES=false
 ISEND=false
 
+VERBOSE=false			 
 
 SUBMODULE_NAME='^[[:space:]]*\\[submodule[[:space:]]*\"(.+)\"[[:space:]]*\\][[:space:]]*$'
 TRIM='^[[:space:]]+|[[:space:]]+$'
@@ -422,7 +423,7 @@ monkey_catch() {
 			PADDING=0
 		fi
 
-		if $SHOW_COMMAND ; then
+		if [[ $SHOW_COMMAND == true || $VERBOSE == true ]] ; then
 			CMDOUT="$(printf '%s ' "${COMMANDS[@]}")"
 			CMDOUT=$(printf "%s" "$CMDOUT" | awk -v pad="$PADDING" '{ printf "%*s%s\n", pad, "", $0 }')
 			printf "\e[${COLOR}m%s\e[0m\n" "$CMDOUT"
@@ -697,8 +698,9 @@ git-monkey() {
         local -n deprecatedmode_ref=$4
         local -n command_ref=$5
         local -n cmd_args_ref=$6
-
-        shift 6
+        local -n verbose_ref=$7
+		
+        shift 7
 
         local public_commands=("spawn" "climb" "tree" "plant" "grow" "status" "stash" "checkout" "pull" "push" "add" "reset" "commit" "mute" "DOS2UNIX" "IGNORE" "RESTORE")
         local private_commands=("error" "monkey_catch" "monkey_say" "error" "yes_no" "get_module_names" "get_module_key" "set_module_key" "dummy")
@@ -720,7 +722,11 @@ git-monkey() {
                         showhelp_ref=true
                         shift
                         ;;
-                    --private)
+                    --verbose)
+                        verbose_ref=true
+                        shift
+                        ;;
+					--private)
                         privatemode_ref=true
                         shift
                         ;;
@@ -755,8 +761,9 @@ git-monkey() {
             fi
         done
     }
-
-	git-monkey_parse SHOW_HELP dir PRIVATEMODE DEPRECATEDMODE command CMDARGS "$@"
+	
+	# VERBOSE IS GLOBAL
+	git-monkey_parse SHOW_HELP dir PRIVATEMODE DEPRECATEDMODE command CMDARGS VERBOSE "$@"
 
 	if [[ -z "$command" ]] || $SHOW_HELP ; then
 	   git-monkey_help
