@@ -1331,7 +1331,7 @@ local str="Legend :
 		#echo ""
 	fi
 	}
-	climb  --tree --header 2 --begin --trunk --branches --leaves --up command
+	climb  --tree --header 2 --begin --trunk --branches --leaves --up --func command
 	
 	unset -f command
 }
