@@ -936,7 +936,7 @@ climb() {
                         shift
                         ;;
                     --header)
-                        if [[ -n "$2" && "$2" =~ ^[0-2]$ ]]; then
+                        if [[ -n "$2" && "$2" =~ ^[0-3]$ ]]; then
                             header_type_ref="$2"
                             shift 2
                         else
@@ -1015,6 +1015,24 @@ climb() {
 		
 	}
 	
+	modbranch() {
+		if $ISTRUNK ; then
+			local gitbranch=$(git -C "$dir/$path" rev-parse --abbrev-ref HEAD 2>&1)
+			printf "(%s)" "$gitbranch" 
+		else 
+			local modbranch=$(get_module_key "$dir/.gitmodules" "$module" "branch" 2>&1)
+			if [ "$?" != 0 ] ; then
+				error -m "$modbranch" 
+			fi
+			if [ -n "$modbranch" ]; then
+				printf "() [%s]" "$modbranch"
+			else 
+				printf "() []" 
+			fi
+		fi
+		
+	}
+	
 	get_module_header() {
 		local header_ref=""
 		case "$1" in
@@ -1028,6 +1046,10 @@ climb() {
 				;;
 			2)
 				header_ref=$(gitbranch_modbranch)
+				shift
+				;;
+			3)
+				header_ref=$(modbranch)
 				shift
 				;;
 			*)
@@ -1185,7 +1207,7 @@ climb() {
 		ISBEGIN=false		
 	fi
 		
-	unset -f climbing -f climb_parse -f get_module_header -f gitbranch -f gitbranch_modbranch
+	unset -f climbing -f climb_parse -f get_module_header -f gitbranch -f gitbranch_modbranch -f modbranch
 }
 
 dummy(){
