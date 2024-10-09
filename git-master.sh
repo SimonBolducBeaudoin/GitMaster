@@ -26,6 +26,10 @@ SUBMODULE_NAME='^[[:space:]]*\\[submodule[[:space:]]*\"(.+)\"[[:space:]]*\\][[:s
 TRIM='^[[:space:]]+|[[:space:]]+$'
 COMMENT='^[[:space:]]*#'
 
+# Used to contain stderr
+stderr_file=$(mktemp)
+trap 'if [ -e "$stderr_file" ]; then rm -f "$stderr_file"; fi' EXIT
+
 git-monkey_help() {
 local help_message="
 An extension of git for projects with git modules.
@@ -442,11 +446,11 @@ monkey_catch() {
 		fi
 		 
 		local color="\033[${COLOR:-32}m"
-		temp_file=$(mktemp)
+		
 		if [[ $SILENT == true ]] ; then
 			# Only stdout to /dev/null
 			 
-			"${COMMANDS[@]}" > /dev/null 2> "temp_file"
+			"${COMMANDS[@]}" > /dev/null 2> "stderr_file"
 			STATUS="$?"
 		else
 			"${COMMANDS[@]}" > >(tee /dev/null | awk -v pad="$PADDING" -v color="$color" '{ printf "%s%*s%s\033[0m\n", color, pad, "", $0 }') 2> "$temp_file"
@@ -2269,5 +2273,6 @@ RESTORE() {
 
 git-monkey "${@}"
 
+rm -f "$stderr_file"
 )
 
