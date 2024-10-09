@@ -428,22 +428,30 @@ monkey_catch() {
 			CMDOUT=$(printf "%s" "$CMDOUT" | awk -v pad="$PADDING" '{ printf "%*s%s\n", pad, "", $0 }')
 			printf "\e[${COLOR}m%s\e[0m\n" "$CMDOUT"
 		fi
-		OUTPUT="$("${COMMANDS[@]}" 2>&1)"
-		STATUS=$?
-		OUTPUT=$(printf "%s" "$OUTPUT" | awk -v pad="$PADDING" '{ printf "%*s%s\n", pad, "", $0 }')
-        
-        local SKIP=false
+		 
+		local color="\033[${COLOR:-32}m"
+		temp_file=$(mktemp)
+		if [[ $SILENT == true ]] ; then
+			# Only stdout to /dev/null
+			 
+			"${COMMANDS[@]}" > /dev/null 2> "temp_file"
+			STATUS="$?"
+		else
+			"${COMMANDS[@]}" > >(tee /dev/null | awk -v pad="$PADDING" -v color="$color" '{ printf "%s%*s%s\033[0m\n", color, pad, "", $0 }') 2> "$temp_file"
+			STATUS="$?"
+		fi						  
+		local SKIP=false
         if [[ "$STATUS " =~ "${OK[@]}" ]] ; then 
             SKIP=true
         fi
-
 		if [[ $STATUS -ne 0 && "$SKIP" == false ]]; then
-			error -m "$OUTPUT"
-		elif $EXTRA_LINE && [[ -n "$OUTPUT" ]] && ! $SILENT; then
-			printf "\e[${COLOR}m%s\e[0m\n" "$OUTPUT"
-		elif ! $SILENT ; then
-			printf "\e[${COLOR}m%s\e[0m" "$OUTPUT"
+			error -m "$temp_file"								 
 		fi
+		rm -f "$temp_file" 
+		
+		# if $EXTRA_LINE; then
+			# printf "\n"
+		# fi
 	}
 
     monkey_catch_parse SHOW_HELP PADDING COLOR MAX_PADDING COMMANDS EXTRA_LINE SHOW_COMMAND SILENT PROMPT OK "$@"
@@ -1225,6 +1233,8 @@ plant() {
 			monkey_say "${branch}" -n --pad "$padding" --color "$WHITE"
 		done
 
+		# This prompts the user for an answer but which is incompatible with monkey_catch
+		# It should now hopefully be fixed (not tested yet)
 		while true; do
 			monkey_say "Enter a branch name to checkout: " --pad "$padding" --color "${color}"
 			read branch_name
