@@ -312,6 +312,7 @@ monkey_catch() {
 	local SILENT=false
 	local PROMPT=false
     local OK=()
+	local EXCEPT=()			   
 
     monkey_catch_parse() {
         local -n show_help_ref=$1
@@ -324,8 +325,9 @@ monkey_catch() {
         local -n silent_ref=$8
 		local -n prompt_ref=$9
 		local -n ok_ref=${10}
+		local -n except_ref=${11}						   
 
-        shift 10
+        shift 11
 
         while (( "$#" )); do
             # no command has been found yet
@@ -390,7 +392,6 @@ monkey_catch() {
                     --ok)
                         shift
                         while (( "$#" )); do
-                            # ends with --ko
                             if [[ -n "$1" && "$1" != -* ]]; then
                                 ok_ref+=("$1")
                                 shift
@@ -399,6 +400,17 @@ monkey_catch() {
                             fi
                         done
                         ;;
+					--except)
+                        shift
+                        while (( "$#" )); do
+                            if [[ -n "$1" && "$1" != -* ]]; then
+                                except_ref+=("$1")
+                                shift
+                            else
+                                break
+                            fi
+                        done
+                        ;;	  
                     -f|--func)
                         cmds_ref+=("$2")
                         shift 2
@@ -444,8 +456,18 @@ monkey_catch() {
         if [[ "$STATUS " =~ "${OK[@]}" ]] ; then 
             SKIP=true
         fi
+		local PASS=false
+        if [[ "$STATUS " =~ "${EXCEPT[@]}" ]] ; then
+			SKIP=true
+            PASS=true
+        fi
+		
 		if [[ $STATUS -ne 0 && "$SKIP" == false ]]; then
-			error -m "$temp_file"								 
+			error -m "$temp_file" --status "$STATUS"								 
+		elif [[ $STATUS -ne 0 && "$PASS" == true ]]; then
+			# This will not be padded properly ...
+			printf "\e[${COLOR}m%s\e[0m\n" "$OUTPUT"
+			return "$STATUS"										   			 
 		fi
 		rm -f "$temp_file" 
 		
@@ -454,7 +476,7 @@ monkey_catch() {
 		# fi
 	}
 
-    monkey_catch_parse SHOW_HELP PADDING COLOR MAX_PADDING COMMANDS EXTRA_LINE SHOW_COMMAND SILENT PROMPT OK "$@"
+    monkey_catch_parse SHOW_HELP PADDING COLOR MAX_PADDING COMMANDS EXTRA_LINE SHOW_COMMAND SILENT PROMPT OK EXCEPT "$@"
 
     if $SHOW_HELP ; then
         monkey_catch_help
