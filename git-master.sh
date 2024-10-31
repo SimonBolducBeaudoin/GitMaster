@@ -1550,7 +1550,7 @@ pull() {
 		elif $FORCE_MERGE ; then
 			pull_type="--no-rebase"
 		elif [ -n "$update" ]; then
-			pull_type=$(get_module_key "$dir/.gitmodules" "$name" "update")
+			pull_type="--$(get_module_key "$dir/.gitmodules" "$name" "update")"
 		fi
 		
 		# only pull module for which branch is defined
