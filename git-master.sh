@@ -759,7 +759,7 @@ git-monkey() {
 		
         shift 7
 
-        local public_commands=("spawn" "climb" "tree" "plant" "grow" "status" "stash" "checkout" "pull" "push" "add" "reset" "commit" "mute" "DOS2UNIX" "IGNORE" "RESTORE")
+        local public_commands=("spawn" "climb" "tree" "plant" "grow" "status" "stash" "checkout" "pull" "push" "add" "reset" "commit" "mute" "DOS2UNIX" "IGNORE" "RESTORE" "REINIT")
         local private_commands=("error" "monkey_catch" "monkey_say" "error" "yes_no" "get_module_names" "get_module_key" "set_module_key" "dummy")
         local deprecated_commands=("branch")
 
@@ -1537,9 +1537,8 @@ pull() {
 		local update
 		local pull_type
 		
-		monkey_say "$path pull " -n --color "$GREEN" 
-		branch=$(get_module_key "$dir/.gitmodules" "$name" "branch")
-		update=$(get_module_key "$dir/.gitmodules" "$name" "update")
+		branch="$(get_module_key "$dir/.gitmodules" "$name" "branch")"
+		update="$(get_module_key "$dir/.gitmodules" "$name" "update")"
 		
 		if [ -n "$branch" ]; then 
 			git -C "$dir/$path" checkout "$branch" --quiet
@@ -1550,13 +1549,19 @@ pull() {
 		elif $FORCE_MERGE ; then
 			pull_type="--no-rebase"
 		elif [ -n "$update" ]; then
-			pull_type="--$(get_module_key "$dir/.gitmodules" "$name" "update")"
+			pull_type="--$update"
+		else 
+			pull_type=""
 		fi
 		
 		# only pull module for which branch is defined
 		# This sorta inforce the use of .gitmodules branch and update.
 		if [ -n "$branch" ]; then 
-			git -C "$dir/$path" pull "$pull_type"
+			if [ -z "$pull_type" ]; then
+				git -C "$dir/$path" pull 
+			else
+				git -C "$dir/$path" pull "$pull_type"
+			fi
 		fi
 	}
 	
@@ -1566,7 +1571,9 @@ pull() {
 		exit 1
 	fi
 	
-	climb --tree --header 1 --trunk --branches --leaves --up "${CLIMBARGS[@]}" --func pull_module
+	climb --tree --header 1 				   --leaves --up "${CLIMBARGS[@]}" --func pull_module
+	climb --tree --header 1 		--branches          --up "${CLIMBARGS[@]}" --func pull_module
+	climb --tree --header 1 --trunk                     --up "${CLIMBARGS[@]}" --func pull_module
 	
 	unset -f pull_module -f pull_parse
 }
@@ -1701,6 +1708,7 @@ add() {
 
 	unset -f add_module -f add_parse 
 }
+
 
 
 # I'm avoiding collision with bash's reset function for now
@@ -2274,6 +2282,20 @@ RESTORE() {
 	climb --trunk --branches --leaves --up "${CLIMBARGS[@]}" --func command 
 
 	unset -f command -f parse 
+}
+
+REINIT(){
+
+	command() {
+		git submodule deinit -f --all
+		git submodule update --init --recursive
+		checkout
+	}
+	
+	MESSAGE="Do you want to reinitialize all submodules ? This will leave the project in the last commited state of the trunk. It is a destructive operation."
+	
+	monkey_say "$MESSAGE" -n --color "$CYAN" # green
+	monkey_catch -n --color "$CYAN" --prompt true --func command 
 }
 
 git-monkey "${@}"
