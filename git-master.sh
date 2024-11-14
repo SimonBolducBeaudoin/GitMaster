@@ -2289,7 +2289,6 @@ REINIT(){
 	command() {
 		git submodule deinit -f --all
 		git submodule update --init --recursive
-		checkout
 	}
 	
 	MESSAGE="Do you want to reinitialize all submodules ? This will leave the project in the last commited state of the trunk. It is a destructive operation."
