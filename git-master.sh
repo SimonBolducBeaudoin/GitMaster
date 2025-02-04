@@ -759,7 +759,7 @@ git-monkey() {
 		
         shift 7
 
-        local public_commands=("spawn" "climb" "tree" "plant" "grow" "status" "stash" "checkout" "pull" "push" "add" "reset" "commit" "mute" "DOS2UNIX" "IGNORE" "RESTORE" "REINIT")
+        local public_commands=("spawn" "climb" "tree" "plant" "grow" "status" "stash" "checkout" "pull" "push" "add" "reset" "commit" "mute" "DOS2UNIX" "IGNORE" "RESTORE" "REINIT" "DEINIT" "INIT")
         local private_commands=("error" "monkey_catch" "monkey_say" "error" "yes_no" "get_module_names" "get_module_key" "set_module_key" "dummy")
         local deprecated_commands=("branch")
 
@@ -2292,6 +2292,30 @@ REINIT(){
 	}
 	
 	MESSAGE="Do you want to reinitialize all submodules ? This will leave the project in the last commited state of the trunk. It is a destructive operation."
+	
+	monkey_say "$MESSAGE" -n --color "$CYAN" # green
+	monkey_catch -n --color "$CYAN" --prompt true --func command 
+}
+
+INIT(){
+
+	command() {
+		git submodule update --init --recursive
+	}
+	
+	MESSAGE="Do you want to initialize all submodules ? This will initialize and fetch all submodule recursively."
+	
+	monkey_say "$MESSAGE" -n --color "$CYAN" # green
+	monkey_catch -n --color "$CYAN" --prompt true --func command 
+}
+
+DEINIT(){
+
+	command() {
+		git submodule deinit -f --all
+	}
+	
+	MESSAGE="Do you want to deinitialize all submodules ? This will leave only the trunk. With all submodule empty and uninitialized."
 	
 	monkey_say "$MESSAGE" -n --color "$CYAN" # green
 	monkey_catch -n --color "$CYAN" --prompt true --func command 
