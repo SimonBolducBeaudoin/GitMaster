@@ -759,7 +759,7 @@ git-monkey() {
 		
         shift 7
 
-        local public_commands=("spawn" "climb" "tree" "plant" "grow" "status" "stash" "checkout" "pull" "push" "add" "reset" "commit" "mute" "DOS2UNIX" "IGNORE" "RESTORE" "REINIT" "DEINIT" "INIT")
+        local public_commands=("spawn" "climb" "tree" "plant" "grow" "status" "stash" "checkout" "fetch" "pull" "push" "add" "reset" "commit" "mute" "DOS2UNIX" "IGNORE" "RESTORE" "REINIT" "DEINIT" "INIT")
         local private_commands=("error" "monkey_catch" "monkey_say" "error" "yes_no" "get_module_names" "get_module_key" "set_module_key" "dummy")
         local deprecated_commands=("branch")
 
@@ -1485,7 +1485,7 @@ checkout() {
 		local name="$3"
 		local branch=$(get_module_key "$dir/.gitmodules" "$name" "branch")
 		if [[ -n "$branch" ]]; then
-			# monkey_say "$path checkout $branch" -n --color "$GREEN"
+            git -C "$dir/$path" fetch --all
 			git -C "$dir/$path" checkout "$branch" 
 		fi
 	}
@@ -1494,6 +1494,61 @@ checkout() {
 	
 	unset -f checkout_module -f checkout_parse
 }
+
+fetch() {
+	local SHOW_HELP=false
+    local CLIMBARGS=()
+	
+	fetch_parse() {
+		local -n show_help_ref=$1
+		local -n force_rebase_ref=$2
+		local -n force_merge_ref=$3
+        local -n climb_args_ref=$4
+		shift 4
+		
+		while [[ $# -gt 0 ]]; do
+			case "$1" in
+				--help)
+					show_help_ref=true
+					shift
+					;;
+				*)
+                    climb_args_ref+=("$1") 
+                    shift
+                ;;
+			esac
+		done
+	}
+	fetch_module(){
+		local dir="$1"
+		local path="$2"
+		local name="$3"
+		local branch
+		
+		branch="$(get_module_key "$dir/.gitmodules" "$name" "branch")"
+		
+		# only fetch module for which branch is defined
+		# This sorta inforce the use of .gitmodules branch and update.
+        if $ISTRUNK ; then
+            git -C "$dir" fetch --all
+		fi
+        
+		if [ -n "$branch" ]; then 
+            git -C "$dir/$path" fetch --all
+		fi
+	}
+	
+	fetch_parse SHOW_HELP FORCE_REBASE FORCE_MERGE CLIMBARGS "${@}"
+	if $SHOW_HELP; then
+		pull_help
+		exit 1
+	fi
+	
+	climb --tree --header 1 --trunk --branches --leaves --up "${CLIMBARGS[@]}" --func fetch_module
+	
+	unset -f fetch_module -f fetch_parse
+}
+
 
 pull() {
 	local SHOW_HELP=false
